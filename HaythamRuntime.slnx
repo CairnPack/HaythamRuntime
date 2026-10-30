@@ -1,0 +1,6 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Haytham.Runtime/Haytham.Runtime.csproj" />
+  </Folder>
+  <Project Path="src/Test/Test.csproj" />
+</Solution>
