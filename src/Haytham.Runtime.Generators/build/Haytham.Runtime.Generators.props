@@ -1,0 +1,9 @@
+<Project>
+    <ItemGroup>
+        <CompilerVisibleProperty Include="PackageId"/>
+        <CompilerVisibleProperty Include="Version"/>
+        <CompilerVisibleProperty Include="Authors"/>
+        <CompilerVisibleProperty Include="Description"/>
+        <CompilerVisibleProperty Include="HaythamRuntimeApplication"/>
+    </ItemGroup>
+</Project>

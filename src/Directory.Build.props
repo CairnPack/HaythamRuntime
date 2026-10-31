@@ -1,0 +1,4 @@
+<Project>
+    <!-- 让 src 下的项目把生成器需要的 MSBuild 属性交给编译器。之后打包时这份 props 会放进 NuGet 包的 build 目录。 -->
+    <Import Project="$(MSBuildThisFileDirectory)Haytham.Runtime.Generators/build/Haytham.Runtime.Generators.props" />
+</Project>

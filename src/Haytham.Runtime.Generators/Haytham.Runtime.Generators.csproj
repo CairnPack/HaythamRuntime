@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <!-- 编译器会把分析器和生成器加载到它自己的进程里，所以生成器以 netstandard2.0 为目标框架。 -->
+        <TargetFramework>netstandard2.0</TargetFramework>
+        <LangVersion>latest</LangVersion>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <!-- 标明这是 Roslyn 组件，并启用编写分析器时要遵守的检查规则（RS1xxx）。 -->
+        <IsRoslynComponent>true</IsRoslynComponent>
+        <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!--
+            固定为不高于 SDK 10.0.403 内置编译器（Roslyn 5.x）的 API 版本。
+            生成器引用的 Roslyn API 可以比运行它的编译器旧，但不能比它新。
+        -->
+        <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" PrivateAssets="all" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- 登记本生成器报告的诊断 ID 的发布追踪文件；没有这两个文件时，RS2008 规则会报警告。 -->
+        <AdditionalFiles Include="AnalyzerReleases.Shipped.md" />
+        <AdditionalFiles Include="AnalyzerReleases.Unshipped.md" />
+    </ItemGroup>
+
+</Project>
