@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <!-- 模块的 Id、版本、作者和说明来自这几项，生成器把它们写进清单。 -->
+        <PackageId>Test.Storage</PackageId>
+        <Version>1.0.0</Version>
+        <Authors>Haytham</Authors>
+        <Description>Manual verification module that owns a simulated storage resource.</Description>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\Haytham.Runtime\Haytham.Runtime.csproj" />
+        <ProjectReference
+            Include="..\Haytham.Runtime.Generators\Haytham.Runtime.Generators.csproj"
+            OutputItemType="Analyzer"
+            ReferenceOutputAssembly="false" />
+    </ItemGroup>
+
+</Project>
