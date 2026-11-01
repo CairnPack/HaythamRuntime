@@ -2,66 +2,52 @@ using Haytham.Runtime.Tasks;
 
 namespace Haytham.Runtime.Events;
 
-/// <summary>
-/// 一个模块在 <see cref="RegisterEvent"/> 中提交的登记清单：它定义的 Event、它的订阅和它提供的 Task。
-/// </summary>
-/// <remarks>
-/// 登记内容先暂存在这里，等所有模块提交后由 Runtime 统一检查冲突并合并。
-/// 所以在这里登记成功不代表最终有效，合并失败时整份注册结果都不会生效。
-/// </remarks>
 public sealed class Registry {
+    private bool open = true;
 
-    private readonly EventBus bus;
-    private readonly List<Type> definedEvents = [];
-    private readonly List<Subscription> subscriptions = [];
-    private readonly List<TaskRoute> tasks = [];
-    private bool submitted;
+    internal Registry(ModuleId module) => Module = module;
 
-    internal Registry(string moduleId, EventBus bus) {
-        ModuleId = moduleId;
-        this.bus = bus;
-    }
+    internal ModuleId Module { get; }
+    internal List<TaskRegistration> Tasks { get; } = [];
+    internal List<EventRegistration> Events { get; } = [];
+    internal List<EventSubscription> Subscriptions { get; } = [];
 
-    public string ModuleId { get; }
-
-    internal IReadOnlyList<Type> DefinedEvents => definedEvents;
-
-    internal IReadOnlyList<Subscription> Subscriptions => subscriptions;
-
-    internal IReadOnlyList<TaskRoute> Tasks => tasks;
-
-    /// <summary>
-    /// 定义本模块拥有的事件，返回只有本模块持有的派发入口。注册结果锁定后才能用它派发。
-    /// </summary>
-    public EventSource<TEvent> DefineEvent<TEvent>() where TEvent : RuntimeEvent {
+    public void RegisterTask(RuntimeTask task) {
+        ArgumentNullException.ThrowIfNull(task);
         RequireOpen();
-        definedEvents.Add(typeof(TEvent));
-        return new EventSource<TEvent>(bus);
+        Tasks.Add(new TaskRegistration(task, Module, task.ExitPolicy));
     }
 
-    /// <summary>
-    /// 订阅生命周期事件或任一模块定义的事件。
-    /// </summary>
+    public void RegisterEvent<TEvent>(EventDefinition<TEvent> definition) where TEvent : RuntimeEvent {
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentException.ThrowIfNullOrWhiteSpace(definition.Name);
+        if (!Enum.IsDefined(definition.Mode)) {
+            throw new RuntimeContractException("事件派发方式无效。");
+        }
+
+        RequireOpen();
+        Events.Add(new EventRegistration(typeof(TEvent), Module, definition.Name, definition.Mode));
+    }
+
     public void Subscribe<TEvent>(RuntimeEventHandler<TEvent> handler) where TEvent : RuntimeEvent {
+        ArgumentNullException.ThrowIfNull(handler);
         RequireOpen();
-        subscriptions.Add(Subscription.Create(ModuleId, handler));
+        Subscriptions.Add(EventSubscription.Create(Module, handler));
     }
 
-    /// <summary>
-    /// 登记一个 Task：调用方提交 <typeparamref name="TInput"/> 时，Runtime 为这次执行新建一个 <see cref="TaskEvent{TInput, TResult}"/>，
-    /// 由 <paramref name="handler"/> 执行业务并设置结果。同一种输入类型在整个 Runtime 里只能有一个 Task。
-    /// </summary>
-    public void AddTask<TInput, TResult>(RuntimeEventHandler<TaskEvent<TInput, TResult>> handler) {
-        RequireOpen();
-        tasks.Add(new TaskRoute(typeof(TInput), ModuleId, Subscription.Create(ModuleId, handler)));
-    }
-
-    internal void Submit() => submitted = true;
+    internal void Close() => open = false;
 
     private void RequireOpen() {
-        if (submitted) {
-            throw new InvalidOperationException($"模块 {ModuleId} 的 Registry 已经提交，不能再登记。");
+        if (!open) {
+            throw new RuntimeContractException("Registry 的注册窗口已关闭。");
         }
     }
+}
 
+internal sealed record TaskRegistration(RuntimeTask Task, ModuleId Module, TaskExitPolicy ExitPolicy);
+internal sealed record EventRegistration(Type Type, ModuleId? Module, string Name, EventDispatchMode Mode);
+
+internal sealed record EventSubscription(Type Type, ModuleId Module, Func<RuntimeEvent, EventContext, ValueTask> Invoke) {
+    internal static EventSubscription Create<TEvent>(ModuleId module, RuntimeEventHandler<TEvent> handler)
+        where TEvent : RuntimeEvent => new(typeof(TEvent), module, (e, context) => handler((TEvent)e, context));
 }

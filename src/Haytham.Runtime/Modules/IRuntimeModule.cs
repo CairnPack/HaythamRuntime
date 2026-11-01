@@ -8,9 +8,8 @@ namespace Haytham.Runtime.Modules;
 public interface IRuntimeModule {
 
     /// <summary>
-    /// Runtime 创建模块之后、锁定模块名单之前调用一次，用来接上 <see cref="RegisterEvent"/> 的订阅。
-    /// 这时只能订阅 <see cref="RegisterEvent"/>；其他事件的订阅、Event 定义和 Task 都在 RegisterEvent 执行时通过 <see cref="Registry"/> 提交。
+    /// 创建模块后接上注册处理器，业务初始化在生命周期事件中进行。
     /// </summary>
-    void Subscribe(EventSubscriber events);
+    void Connect(ModuleWiring wiring);
 
 }

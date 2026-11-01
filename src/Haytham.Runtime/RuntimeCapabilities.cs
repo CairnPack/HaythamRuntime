@@ -8,6 +8,15 @@ public sealed class RuntimeCapabilities {
 
     private readonly Dictionary<Type, object> items = new();
 
+    internal RuntimeCapabilities Snapshot() {
+        var snapshot = new RuntimeCapabilities();
+        foreach (var item in items) {
+            snapshot.items.Add(item.Key, item.Value);
+        }
+
+        return snapshot;
+    }
+
     public RuntimeCapabilities Add<T>(T value) where T : class {
         ArgumentNullException.ThrowIfNull(value);
         if (!items.TryAdd(typeof(T), value)) {
