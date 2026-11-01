@@ -41,7 +41,8 @@ internal sealed class EventDispatcher(RuntimeHost host) {
         var mergedTasks = new Dictionary<Type, TaskRegistration>();
         foreach (var registry in registries) {
             foreach (var definition in registry.Events) {
-                if (!mergedEvents.TryAdd(definition.Type, definition)) {
+                if (typeof(LifecycleEvent).IsAssignableFrom(definition.Type) || IsTaskEvent(definition.Type)
+                    || !mergedEvents.TryAdd(definition.Type, definition)) {
                     problems.Add($"事件 {definition.Type.FullName} 重复定义或覆盖内置事件。");
                 }
             }
@@ -55,8 +56,8 @@ internal sealed class EventDispatcher(RuntimeHost host) {
 
         var mergedSubscriptions = registries.SelectMany(static registry => registry.Subscriptions).ToArray();
         foreach (var subscription in mergedSubscriptions) {
-            if (subscription.Type == typeof(RuntimeEvents.OnRegistering)) {
-                problems.Add("不能通过 Registry 订阅 OnRegistering。");
+            if (subscription.Type == typeof(RuntimeEvents.OnRegistering) || IsTaskEvent(subscription.Type)) {
+                problems.Add($"不能通过 Registry 订阅 {subscription.Type.Name}。");
             }
             else if (!mergedEvents.ContainsKey(subscription.Type)) {
                 problems.Add($"订阅的事件 {subscription.Type.FullName} 未定义或不可通过 Registry 订阅。");
@@ -92,18 +93,24 @@ internal sealed class EventDispatcher(RuntimeHost host) {
     internal ValueTask<TResult> ExecuteTaskAsync<TInput, TResult>(RuntimeTask<TInput, TResult> task, TInput input, WorkNode node) =>
         task.ExecuteCoreAsync(new TaskEvent<TInput, TResult>(input, node));
 
-    internal ValueTask DispatchAsync(RuntimeEvent e, WorkNode node, Action? onHandlerReturned = null) {
+    internal ValueTask DispatchAsync(RuntimeEvent e, WorkNode node, Action? onHandlerReturned = null,
+        Action<RuntimeExecutionException>? onFailure = null) {
         var definition = definitions[e.GetType()];
-        var participants = e is LifecycleEvent lifecycle
-            ? (e is RuntimeEvents.OnRegistering ? registerHandlers : subscriptions.AsEnumerable())
-                .Where(subscription => subscription.Type == e.GetType() && subscription.Module == lifecycle.TargetModule).ToArray()
-            : subscriptions.Where(subscription => subscription.Type == e.GetType() && host.IsModuleAvailable(subscription.Module)).ToArray();
+        EventSubscription[] participants;
+        lock (host.Gate) {
+            participants = e is LifecycleEvent lifecycle
+                ? (e is RuntimeEvents.OnRegistering ? registerHandlers : subscriptions.AsEnumerable())
+                .Where(subscription =>
+                    subscription.Type == e.GetType() && subscription.Module == lifecycle.TargetModule).ToArray()
+                : subscriptions.Where(subscription =>
+                    subscription.Type == e.GetType() && host.IsModuleAvailable(subscription.Module)).ToArray();
+        }
 
         return definition.Mode switch {
             EventDispatchMode.SerialFailFast => DispatchSerialAsync(e, node, participants, false, onHandlerReturned),
             EventDispatchMode.SerialCollect => DispatchSerialAsync(e, node, participants, true, onHandlerReturned),
-            EventDispatchMode.ParallelJoin => DispatchParallelJoinAsync(e, node, participants),
-            EventDispatchMode.ParallelFailFast => DispatchParallelFailFastAsync(e, node, participants),
+            EventDispatchMode.ParallelJoin => DispatchParallelAsync(e, node, participants, null),
+            EventDispatchMode.ParallelFailFast => DispatchParallelAsync(e, node, participants, onFailure),
             _ => throw new RuntimeContractException("事件派发方式无效。")
         };
     }
@@ -111,6 +118,7 @@ internal sealed class EventDispatcher(RuntimeHost host) {
     private static async ValueTask DispatchSerialAsync(RuntimeEvent e, WorkNode parent, EventSubscription[] participants,
         bool collect, Action? onHandlerReturned) {
         var failures = new List<RuntimeFailure>();
+        var canceled = false;
         foreach (var participant in participants) {
             try {
                 await parent.RunChild(e.GetType().Name, participant.Module, async child => {
@@ -131,16 +139,81 @@ internal sealed class EventDispatcher(RuntimeHost host) {
                     break;
                 }
             }
+            catch (OperationCanceledException) {
+                canceled = true;
+                if (!collect) {
+                    break;
+                }
+            }
         }
 
         if (failures.Count > 0) {
             throw new RuntimeExecutionException($"事件 {e.GetType().Name} 派发失败。", failures);
         }
+
+        if (canceled) {
+            throw new OperationCanceledException(parent.Cancellation);
+        }
     }
 
-    private static ValueTask DispatchParallelJoinAsync(RuntimeEvent e, WorkNode parent, EventSubscription[] participants) =>
-        throw new NotImplementedException("并行派发与全部参与者汇合尚未实现。");
+    private static async ValueTask DispatchParallelAsync(RuntimeEvent e, WorkNode parent, EventSubscription[] participants,
+        Action<RuntimeExecutionException>? onFailure) {
+        var children = participants.Select(participant => parent.RegisterChild(e.GetType().Name, participant.Module,
+            async child => {
+                await participant.Invoke(e, new EventContext(child));
+                return true;
+            })).ToArray();
 
-    private static ValueTask DispatchParallelFailFastAsync(RuntimeEvent e, WorkNode parent, EventSubscription[] participants) =>
-        throw new NotImplementedException("并行首错提前返回及后续执行追踪尚未实现。");
+        // 全部登记后才调度，处理器的同步部分也可以并行执行。
+        foreach (var child in children) {
+            _ = Task.Run(child.Start);
+        }
+
+        var joined = JoinAsync();
+        if (onFailure is not null && children.Length > 0) {
+            var firstFailure = Task.WhenAny(children.Select(static child => child.Failure)).Unwrap();
+            await Task.WhenAny(firstFailure, joined);
+            if (firstFailure.IsCompletedSuccessfully) {
+                onFailure(firstFailure.Result);
+            }
+        }
+
+        await joined;
+
+        async Task JoinAsync() {
+            var failures = new List<RuntimeFailure>();
+            var canceled = false;
+            await foreach (var completion in Task.WhenEach(children.Select(static child => child.Completion))) {
+                try {
+                    await completion;
+                }
+                catch (RuntimeExecutionException error) {
+                    failures.AddRange(error.Failures);
+                }
+                catch (OperationCanceledException) {
+                    canceled = true;
+                }
+            }
+
+            if (failures.Count > 0) {
+                throw new RuntimeExecutionException($"事件 {e.GetType().Name} 派发失败。", failures);
+            }
+
+            if (canceled) {
+                throw new OperationCanceledException(parent.Cancellation);
+            }
+        }
+    }
+
+    private static bool IsTaskEvent(Type type) =>
+        type.IsGenericType && type.GetGenericTypeDefinition() == typeof(TaskEvent<,>);
+
+    internal static async ValueTask WaitForPublishAsync(Task completion, Task<RuntimeExecutionException> firstFailure) {
+        // 首错只结束发布等待，completion 仍代表完整的派发工作树。
+        if (await Task.WhenAny(completion, firstFailure) == firstFailure) {
+            throw await firstFailure;
+        }
+
+        await completion;
+    }
 }

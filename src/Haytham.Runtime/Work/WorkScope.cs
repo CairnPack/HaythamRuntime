@@ -26,10 +26,12 @@ public sealed class WorkScope {
     public ValueTask PublishAsync<TEvent>(TEvent e) where TEvent : RuntimeEvent {
         ArgumentNullException.ThrowIfNull(e);
         node.Host.Events.CheckPublish(node.Module, e);
-        return new ValueTask(node.RunChild(e.GetType().Name, node.Module, async child => {
-            await node.Host.Events.DispatchAsync(e, child);
+        var firstFailure = new TaskCompletionSource<RuntimeExecutionException>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var completion = node.RunChild(e.GetType().Name, node.Module, async child => {
+            await node.Host.Events.DispatchAsync(e, child, onFailure: error => firstFailure.TrySetResult(error));
             return true;
-        }));
+        });
+        return EventDispatcher.WaitForPublishAsync(completion, firstFailure.Task);
     }
 
     public ValueTask<TResult> InvokeAsync<TTask, TInput, TResult>(TInput input)

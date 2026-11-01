@@ -17,7 +17,7 @@ internal sealed class StorageModule(TextWriter log) : IRuntimeModule {
     public void Connect(ModuleWiring wiring) => wiring.SubscribeRegister(OnRegistering);
 
     private ValueTask OnRegistering(RuntimeEvents.OnRegistering e, EventContext context) {
-        e.Registry.RegisterEvent(new EventDefinition<StorageChangedEvent>("Storage changed", EventDispatchMode.SerialFailFast));
+        e.Registry.RegisterEvent(new EventDefinition<StorageChangedEvent>("Storage changed", EventDispatchMode.ParallelJoin));
         e.Registry.Subscribe<RuntimeEvents.OnLoading>(OnLoading);
         e.Registry.Subscribe<RuntimeEvents.OnUnloading>(OnUnloading);
         e.Registry.RegisterTask(new SaveValueTask(this));

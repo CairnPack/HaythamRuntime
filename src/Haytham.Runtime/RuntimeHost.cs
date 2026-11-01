@@ -132,6 +132,7 @@ public sealed partial class RuntimeHost {
         Events.CheckPublish(module, e);
         WorkNode node;
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstFailure = new TaskCompletionSource<RuntimeExecutionException>(TaskCreationOptions.RunContinuationsAsynchronously);
         lock (Gate) {
             RequireRootAdmission();
             node = new WorkNode(this, module, cancellation, null);
@@ -139,13 +140,13 @@ public sealed partial class RuntimeHost {
         }
 
         _ = RunAsync();
-        return new ValueTask(completion.Task);
+        return EventDispatcher.WaitForPublishAsync(completion.Task, firstFailure.Task);
 
         async Task RunAsync() {
             Exception? failure = null;
             try {
                 await node.ExecuteAsync(async current => {
-                    await Events.DispatchAsync(e, current);
+                    await Events.DispatchAsync(e, current, onFailure: error => firstFailure.TrySetResult(error));
                     return true;
                 });
             }

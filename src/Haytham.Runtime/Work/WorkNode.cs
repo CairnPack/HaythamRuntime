@@ -7,13 +7,20 @@ internal sealed class WorkNode {
     private readonly List<Task> children = [];
     private readonly CancellationTokenSource cancellation;
     private readonly CancellationToken parentCancellation;
+    private readonly WorkNode? parent;
+
+    private readonly TaskCompletionSource<RuntimeExecutionException> failure =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     private bool open = true;
     private bool finished;
 
-    internal WorkNode(RuntimeHost host, ModuleId module, CancellationToken parentCancellation, TaskOutput? output) {
+    internal WorkNode(RuntimeHost host, ModuleId module, CancellationToken parentCancellation, TaskOutput? output,
+        WorkNode? parent = null) {
         Host = host;
         Module = module;
         this.parentCancellation = parentCancellation;
+        this.parent = parent;
         cancellation = CancellationTokenSource.CreateLinkedTokenSource(parentCancellation);
         Cancellation = cancellation.Token;
         Output = output;
@@ -26,6 +33,13 @@ internal sealed class WorkNode {
     internal TaskOutput? Output { get; }
 
     internal Task<T> RunChild<T>(string name, ModuleId module, Func<WorkNode, ValueTask<T>> operation) {
+        var child = RegisterChild(name, module, operation);
+        child.Start();
+        return child.Completion;
+    }
+
+    internal (Task<T> Completion, Task<RuntimeExecutionException> Failure, Action Start) RegisterChild<T>(
+        string name, ModuleId module, Func<WorkNode, ValueTask<T>> operation) {
         WorkNode child;
         var completion = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
         lock (gate) {
@@ -33,12 +47,11 @@ internal sealed class WorkNode {
                 throw new RuntimeContractException($"工作登记窗口已关闭，不能登记 {name}。");
             }
 
-            child = new WorkNode(Host, module, Cancellation, Output);
+            child = new WorkNode(Host, module, Cancellation, Output, this);
             children.Add(completion.Task);
         }
 
-        _ = RunAsync();
-        return completion.Task;
+        return (completion.Task, child.failure.Task, () => { _ = RunAsync(); });
 
         async Task RunAsync() {
             try {
@@ -56,6 +69,7 @@ internal sealed class WorkNode {
     internal async Task<T> ExecuteAsync<T>(Func<WorkNode, ValueTask<T>> operation) {
         var failures = new List<RuntimeFailure>();
         var canceled = false;
+        Exception? operationFailure = null;
         T result = default!;
         try {
             result = await operation(this);
@@ -64,14 +78,7 @@ internal sealed class WorkNode {
             canceled = true;
         }
         catch (Exception error) {
-            AddFailure(error);
-            // 失败后先请求后代取消，随后仍等待真实结束。
-            try {
-                CancelDescendants();
-            }
-            catch (Exception cancellationError) {
-                failures.Add(new RuntimeFailure(RuntimeFailureKind.Cleanup, "请求后代取消失败。", cancellationError, Module));
-            }
+            operationFailure = error;
         }
         finally {
             lock (gate) {
@@ -79,14 +86,25 @@ internal sealed class WorkNode {
             }
         }
 
-        await WaitForDescendantsAsync(error => {
-            if (error is OperationCanceledException) {
+        if (operationFailure is not null) {
+            AddFailure(operationFailure);
+            CancelAfterFailure();
+        }
+
+        // 登记窗口已关闭，按完成顺序收集，避免较早登记的工作阻挡故障收尾。
+        await foreach (var child in Task.WhenEach(children)) {
+            try {
+                await child;
+            }
+            catch (OperationCanceledException) when (child.IsCanceled) {
                 canceled = true;
             }
-            else {
+            catch (Exception error) {
                 AddFailure(error);
+                CancelAfterFailure();
             }
-        });
+        }
+
         lock (gate) {
             finished = true;
             cancellation.Dispose();
@@ -104,41 +122,45 @@ internal sealed class WorkNode {
         return result;
 
         void AddFailure(Exception error) {
+            IReadOnlyList<RuntimeFailure> added;
             if (error is RuntimeExecutionException execution) {
-                failures.AddRange(execution.Failures);
+                added = execution.Failures;
             }
             else {
-                failures.Add(new RuntimeFailure(
-                    error is RuntimeContractException ? RuntimeFailureKind.Contract : RuntimeFailureKind.Execution,
-                    error.Message, error, Module));
+                added = [
+                    new RuntimeFailure(
+                        error is RuntimeContractException ? RuntimeFailureKind.Contract : RuntimeFailureKind.Execution,
+                        error.Message, error, Module)
+                ];
             }
-        }
-    }
 
-    internal async Task WaitForDescendantsAsync(Action<Exception> onFailure) {
-        foreach (var child in children) {
+            failures.AddRange(added);
+            failure.TrySetResult(new RuntimeExecutionException("受托管工作执行失败。", added));
+        }
+
+        void CancelAfterFailure() {
             try {
-                await child;
+                // 取消请求不能代替等待后代真实结束。
+                RequestCancellation();
             }
-            catch (Exception error) {
-                onFailure(error);
+            catch (Exception cancellationError) {
+                failures.Add(new RuntimeFailure(RuntimeFailureKind.Cleanup, "请求后代取消失败。", cancellationError, Module));
             }
         }
     }
-
-    internal void CancelDescendants() => cancellation.Cancel();
 
     private bool IsEffectiveCancellation(OperationCanceledException error) {
-        if (!Cancellation.IsCancellationRequested) {
-            return false;
+        for (var source = this; source is not null; source = source.parent) {
+            if ((source.Cancellation.IsCancellationRequested && error.CancellationToken == source.Cancellation)
+                || (source.parentCancellation.IsCancellationRequested &&
+                    error.CancellationToken == source.parentCancellation)) {
+                return true;
+            }
         }
 
-        if (error.CancellationToken == Cancellation
-            || (parentCancellation.IsCancellationRequested && error.CancellationToken == parentCancellation)) {
-            return true;
+        lock (gate) {
+            return error is TaskCanceledException { Task: { IsCanceled: true } child } && children.Contains(child);
         }
-
-        return error is TaskCanceledException { Task: { } child } && children.Contains(child);
     }
 
     internal void RequestCancellation() {
