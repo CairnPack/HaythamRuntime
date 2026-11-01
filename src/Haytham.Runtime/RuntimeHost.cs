@@ -26,6 +26,7 @@ public sealed partial class RuntimeHost {
     internal object Gate { get; } = new();
     internal EventDispatcher Events { get; private set; } = null!;
     internal ContinuousWorkManager ContinuousWork { get; }
+    internal AsyncLocal<WorkNode?> CurrentWork { get; } = new();
 
     public static RuntimeHost Create(IReadOnlyList<ModuleDefinition> definitions, RuntimeCapabilities capabilities) {
         ArgumentNullException.ThrowIfNull(definitions);
@@ -86,7 +87,7 @@ public sealed partial class RuntimeHost {
         }
     }
 
-    internal void InitializeEvents() => Events = new EventDispatcher(this);
+    internal void InitializeEvents(IReadOnlyList<ModuleDefinition> definitions) => Events = new EventDispatcher(this, definitions);
     internal void SetState(RuntimeState value) => Volatile.Write(ref state, (int)value);
 
     internal void SetAdmission(bool open) {
@@ -129,12 +130,12 @@ public sealed partial class RuntimeHost {
 
     internal ValueTask PublishRootAsync<TEvent>(ModuleId module, TEvent e, CancellationToken cancellation) where TEvent : RuntimeEvent {
         ArgumentNullException.ThrowIfNull(e);
-        Events.CheckPublish(module, e);
         WorkNode node;
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var firstFailure = new TaskCompletionSource<RuntimeExecutionException>(TaskCreationOptions.RunContinuationsAsynchronously);
         lock (Gate) {
             RequireRootAdmission();
+            Events.CheckPublish(module, e);
             node = new WorkNode(this, module, cancellation, null);
             RegisterRoot(node.Id, new RootExecution(completion.Task, static () => null));
         }

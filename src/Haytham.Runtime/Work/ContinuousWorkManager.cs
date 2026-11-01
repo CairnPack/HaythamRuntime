@@ -20,7 +20,11 @@ internal sealed class ContinuousWorkManager(RuntimeHost host) {
         }
     }
 
-    internal Task WaitReadyAsync() => Task.WhenAll(runs.Values.Select(static run => run.Handle.Ready));
+    internal async Task WaitReadyAsync() {
+        await foreach (var ready in Task.WhenEach(runs.Values.Select(static run => run.Handle.Ready))) {
+            await ready;
+        }
+    }
 
     internal void ConfirmReady() {
         foreach (var run in runs.Values) {

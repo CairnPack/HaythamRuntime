@@ -1,16 +1,19 @@
+using System.Collections.Frozen;
+using Haytham.Runtime.Modules;
 using Haytham.Runtime.Tasks;
 using Haytham.Runtime.Work;
 
 namespace Haytham.Runtime.Events;
 
-internal sealed class EventDispatcher(RuntimeHost host) {
-    private Dictionary<Type, EventRegistration> definitions = [];
+internal sealed class EventDispatcher(RuntimeHost host, IReadOnlyList<ModuleDefinition> modules) {
+    private readonly Dictionary<Type, EventRegistration> builtIns = [];
     private readonly List<EventSubscription> registerHandlers = [];
-    private EventSubscription[] subscriptions = [];
-    private Dictionary<Type, TaskRegistration> tasks = [];
+    private readonly Dictionary<ModuleId, HashSet<ModuleId>> dependencies = [];
+    private EventSubscription[] registrationPlan = [];
+    private DispatchPlan? plan;
     private bool modulesLocked;
 
-    internal bool IsLocked { get; private set; }
+    internal bool IsLocked => Volatile.Read(ref plan) is not null;
 
     internal void RegisterBuiltIns() {
         Add<RuntimeEvents.OnRegistering>(EventDispatchMode.SerialFailFast);
@@ -22,7 +25,7 @@ internal sealed class EventDispatcher(RuntimeHost host) {
         // TaskEvent 族通过 ExecuteTaskAsync 的类型化适配器执行，不开放业务订阅。
 
         void Add<TEvent>(EventDispatchMode mode) where TEvent : RuntimeEvent =>
-            definitions.Add(typeof(TEvent), new EventRegistration(typeof(TEvent), null, typeof(TEvent).Name, mode));
+            builtIns.Add(typeof(TEvent), new EventRegistration(typeof(TEvent), null, typeof(TEvent).Name, mode));
     }
 
     internal void AddRegisterHandler(ModuleId module, RuntimeEventHandler<RuntimeEvents.OnRegistering> handler) {
@@ -33,17 +36,52 @@ internal sealed class EventDispatcher(RuntimeHost host) {
         registerHandlers.Add(EventSubscription.Create(module, handler));
     }
 
-    internal void LockModules() => modulesLocked = true;
+    internal void LockModules() {
+        foreach (var module in modules) {
+            var inherited = new HashSet<ModuleId>();
+            foreach (var dependency in module.Dependencies) {
+                var id = new ModuleId(dependency);
+                inherited.Add(id);
+                inherited.UnionWith(dependencies[id]);
+            }
+
+            dependencies.Add(new ModuleId(module.Id), inherited);
+        }
+
+        registrationPlan = registerHandlers.ToArray();
+        modulesLocked = true;
+    }
+
+    internal IReadOnlySet<ModuleId> GetDependencies(ModuleId module) => dependencies[module];
 
     internal void MergeAndLock(IReadOnlyList<Registry> registries) {
         var problems = new List<string>();
-        var mergedEvents = new Dictionary<Type, EventRegistration>(definitions);
+        var mergedEvents = new Dictionary<Type, EventRegistration>(builtIns);
         var mergedTasks = new Dictionary<Type, TaskRegistration>();
+        var candidates = new List<Registry>();
+        var owners = new HashSet<ModuleId>();
+        var reservedNames = builtIns.Values.Select(static definition => definition.Name)
+            .Append(nameof(TaskEvent<,>)).Append(typeof(TaskEvent<,>).Name).ToHashSet(StringComparer.Ordinal);
         foreach (var registry in registries) {
+            if (registry.Owner != this || !registry.IsAccepted || !dependencies.ContainsKey(registry.Module)
+                || !owners.Add(registry.Module)) {
+                problems.Add($"模块 {registry.Module} 的 Registry 不属于本宿主的有效注册执行，或重复接受清单。");
+                continue;
+            }
+
+            candidates.Add(registry);
             foreach (var definition in registry.Events) {
-                if (typeof(LifecycleEvent).IsAssignableFrom(definition.Type) || IsTaskEvent(definition.Type)
-                    || !mergedEvents.TryAdd(definition.Type, definition)) {
-                    problems.Add($"事件 {definition.Type.FullName} 重复定义或覆盖内置事件。");
+                if (typeof(LifecycleEvent).IsAssignableFrom(definition.Type) || IsTaskEvent(definition.Type)) {
+                    problems.Add($"事件 {definition.Type.FullName} 不能覆盖内置事件。");
+                }
+                else {
+                    if (reservedNames.Contains(definition.Name)) {
+                        problems.Add($"事件 {definition.Type.FullName} 冒用内置保留名称 {definition.Name}。");
+                    }
+
+                    if (!mergedEvents.TryAdd(definition.Type, definition)) {
+                        problems.Add($"事件 {definition.Type.FullName} 重复定义。");
+                    }
                 }
             }
 
@@ -54,35 +92,41 @@ internal sealed class EventDispatcher(RuntimeHost host) {
             }
         }
 
-        var mergedSubscriptions = registries.SelectMany(static registry => registry.Subscriptions).ToArray();
+        foreach (var module in dependencies.Keys.Where(module => !owners.Contains(module))) {
+            problems.Add($"模块 {module} 没有有效的注册清单。");
+        }
+
+        var mergedSubscriptions = candidates.SelectMany(static registry => registry.Subscriptions).ToArray();
         foreach (var subscription in mergedSubscriptions) {
             if (subscription.Type == typeof(RuntimeEvents.OnRegistering) || IsTaskEvent(subscription.Type)) {
                 problems.Add($"不能通过 Registry 订阅 {subscription.Type.Name}。");
             }
-            else if (!mergedEvents.ContainsKey(subscription.Type)) {
+            else if (!mergedEvents.TryGetValue(subscription.Type, out var definition)) {
                 problems.Add($"订阅的事件 {subscription.Type.FullName} 未定义或不可通过 Registry 订阅。");
+            }
+            else if (definition.Module is { } owner && owner != subscription.Module
+                && !dependencies[subscription.Module].Contains(owner)) {
+                problems.Add($"模块 {subscription.Module} 订阅事件 {subscription.Type.FullName}，但没有直接或间接依赖定义模块 {owner}。");
             }
         }
 
-        // 完整的跨模块依赖、保留身份及静态契约检查留待合并检查任务补齐。
         if (problems.Count > 0) {
             throw new RuntimeConfigurationException("Registry 合并失败。", problems);
         }
 
-        definitions = mergedEvents;
-        tasks = mergedTasks;
-        subscriptions = mergedSubscriptions;
-        IsLocked = true;
+        Volatile.Write(ref plan, new DispatchPlan(mergedEvents.ToFrozenDictionary(), mergedTasks.ToFrozenDictionary(), mergedSubscriptions));
     }
 
     internal void CheckPublish(ModuleId module, RuntimeEvent e) {
-        if (!IsLocked || e.IsBuiltIn || !definitions.TryGetValue(e.GetType(), out var definition) || definition.Module != module) {
+        var current = Volatile.Read(ref plan);
+        if (current is null || e.IsBuiltIn || !current.Events.TryGetValue(e.GetType(), out var definition) || definition.Module != module) {
             throw new RuntimeContractException($"模块 {module} 不能发布事件 {e.GetType().Name}。");
         }
     }
 
     internal TaskRegistration GetTask<TTask, TInput, TResult>() where TTask : RuntimeTask<TInput, TResult> {
-        if (!IsLocked || !tasks.TryGetValue(typeof(TTask), out var registration)
+        var current = Volatile.Read(ref plan);
+        if (current is null || !current.Tasks.TryGetValue(typeof(TTask), out var registration)
             || registration.Task is not RuntimeTask<TInput, TResult> || !host.IsModuleAvailable(registration.Module)) {
             throw new RuntimeContractException($"Task {typeof(TTask).Name} 未登记、类型不匹配或所属模块不可执行。");
         }
@@ -95,14 +139,15 @@ internal sealed class EventDispatcher(RuntimeHost host) {
 
     internal ValueTask DispatchAsync(RuntimeEvent e, WorkNode node, Action? onHandlerReturned = null,
         Action<RuntimeExecutionException>? onFailure = null) {
-        var definition = definitions[e.GetType()];
+        var current = Volatile.Read(ref plan);
+        var definition = e is RuntimeEvents.OnRegistering ? builtIns[e.GetType()] : current!.Events[e.GetType()];
+        var candidates = e is RuntimeEvents.OnRegistering ? registrationPlan : current!.Subscriptions;
         EventSubscription[] participants;
         lock (host.Gate) {
             participants = e is LifecycleEvent lifecycle
-                ? (e is RuntimeEvents.OnRegistering ? registerHandlers : subscriptions.AsEnumerable())
-                .Where(subscription =>
+                ? candidates.Where(subscription =>
                     subscription.Type == e.GetType() && subscription.Module == lifecycle.TargetModule).ToArray()
-                : subscriptions.Where(subscription =>
+                : candidates.Where(subscription =>
                     subscription.Type == e.GetType() && host.IsModuleAvailable(subscription.Module)).ToArray();
         }
 
@@ -122,6 +167,10 @@ internal sealed class EventDispatcher(RuntimeHost host) {
         foreach (var participant in participants) {
             try {
                 await parent.RunChild(e.GetType().Name, participant.Module, async child => {
+                    if (e is RuntimeEvents.OnRegistering registering) {
+                        registering.Registry.Open(child);
+                    }
+
                     try {
                         await participant.Invoke(e, new EventContext(child));
                     }
@@ -207,6 +256,11 @@ internal sealed class EventDispatcher(RuntimeHost host) {
 
     private static bool IsTaskEvent(Type type) =>
         type.IsGenericType && type.GetGenericTypeDefinition() == typeof(TaskEvent<,>);
+
+    private sealed record DispatchPlan(
+        FrozenDictionary<Type, EventRegistration> Events,
+        FrozenDictionary<Type, TaskRegistration> Tasks,
+        EventSubscription[] Subscriptions);
 
     internal static async ValueTask WaitForPublishAsync(Task completion, Task<RuntimeExecutionException> firstFailure) {
         // 首错只结束发布等待，completion 仍代表完整的派发工作树。

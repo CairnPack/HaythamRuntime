@@ -1,13 +1,21 @@
 using Haytham.Runtime.Tasks;
+using Haytham.Runtime.Work;
 
 namespace Haytham.Runtime.Events;
 
 public sealed class Registry {
-    private bool open = true;
+    private bool open;
+    private bool accepted;
+    private WorkNode? execution;
 
-    internal Registry(ModuleId module) => Module = module;
+    internal Registry(EventDispatcher owner, ModuleId module) {
+        Owner = owner;
+        Module = module;
+    }
 
+    internal EventDispatcher Owner { get; }
     internal ModuleId Module { get; }
+    internal bool IsAccepted => accepted && !open;
     internal List<TaskRegistration> Tasks { get; } = [];
     internal List<EventRegistration> Events { get; } = [];
     internal List<EventSubscription> Subscriptions { get; } = [];
@@ -35,11 +43,22 @@ public sealed class Registry {
         Subscriptions.Add(EventSubscription.Create(Module, handler));
     }
 
+    internal void Open(WorkNode node) {
+        execution = node;
+        open = true;
+    }
+
     internal void Close() => open = false;
+
+    internal void Accept() => accepted = true;
 
     private void RequireOpen() {
         if (!open) {
             throw new RuntimeContractException("Registry 的注册窗口已关闭。");
+        }
+
+        if (execution!.Host.CurrentWork.Value != execution) {
+            throw new RuntimeContractException("Registry 只能由所属注册处理器修改，不能由必要子工作修改。");
         }
     }
 }

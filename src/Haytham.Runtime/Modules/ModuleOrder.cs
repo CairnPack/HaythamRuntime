@@ -23,15 +23,15 @@ internal static class ModuleOrder {
             }
         }
 
-        if (problems.Count > 0) {
-            throw new RuntimeConfigurationException("模块列表不完整。", problems);
-        }
-
         var ordered = new List<ModuleDefinition>(definitions.Count);
         var visiting = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var definition in definitions) {
             Visit(definition);
+        }
+
+        if (problems.Count > 0) {
+            throw new RuntimeConfigurationException("模块清单预检失败。", problems);
         }
 
         return ordered;
@@ -42,11 +42,14 @@ internal static class ModuleOrder {
             }
 
             if (!visiting.Add(definition.Id)) {
-                throw new RuntimeConfigurationException("模块依赖成环。", [$"环中包含模块 {definition.Id}。"]);
+                problems.Add($"模块依赖成环，环中包含模块 {definition.Id}。");
+                return;
             }
 
             foreach (var dependency in definition.Dependencies) {
-                Visit(byId[dependency]);
+                if (byId.TryGetValue(dependency, out var target)) {
+                    Visit(target);
+                }
             }
 
             visiting.Remove(definition.Id);

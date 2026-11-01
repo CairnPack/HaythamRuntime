@@ -71,6 +71,8 @@ internal sealed class WorkNode {
         var canceled = false;
         Exception? operationFailure = null;
         T result = default!;
+        var previous = Host.CurrentWork.Value;
+        Host.CurrentWork.Value = this;
         try {
             result = await operation(this);
         }
@@ -81,6 +83,7 @@ internal sealed class WorkNode {
             operationFailure = error;
         }
         finally {
+            Host.CurrentWork.Value = previous;
             lock (gate) {
                 open = false;
             }

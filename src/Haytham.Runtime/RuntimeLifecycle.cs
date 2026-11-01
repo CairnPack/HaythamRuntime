@@ -10,12 +10,16 @@ internal sealed class RuntimeLifecycle(RuntimeHost host, IReadOnlyList<ModuleDef
     private readonly List<ModuleId> started = [];
     private int busy;
 
-    internal async Task StartAsync() {
+    internal Task StartAsync() {
         Begin(nameof(StartAsync), RuntimeState.Created);
+        host.SetState(RuntimeState.Starting);
+        return StartCoreAsync();
+    }
+
+    private async Task StartCoreAsync() {
         try {
-            host.SetState(RuntimeState.Starting);
             try {
-                host.InitializeEvents();
+                host.InitializeEvents(definitions);
                 host.Events.RegisterBuiltIns();
 
                 foreach (var definition in definitions) {
@@ -36,7 +40,7 @@ internal sealed class RuntimeLifecycle(RuntimeHost host, IReadOnlyList<ModuleDef
 
                 var registries = new List<Registry>();
                 foreach (var module in modules) {
-                    var registry = new Registry(module.Id);
+                    var registry = new Registry(host.Events, module.Id);
                     try {
                         await DispatchAsync(new RuntimeEvents.OnRegistering(module.Id, registry), registry.Close);
                     }
@@ -44,6 +48,7 @@ internal sealed class RuntimeLifecycle(RuntimeHost host, IReadOnlyList<ModuleDef
                         registry.Close();
                     }
 
+                    registry.Accept();
                     registries.Add(registry);
                 }
 
@@ -68,8 +73,8 @@ internal sealed class RuntimeLifecycle(RuntimeHost host, IReadOnlyList<ModuleDef
                 }
 
                 await host.ContinuousWork.WaitReadyAsync();
-                host.ContinuousWork.ConfirmReady();
                 lock (host.Gate) {
+                    host.ContinuousWork.ConfirmReady();
                     host.SetState(RuntimeState.Running);
                     host.SetAdmission(true);
                 }
@@ -78,10 +83,11 @@ internal sealed class RuntimeLifecycle(RuntimeHost host, IReadOnlyList<ModuleDef
                 var failures = GetFailures(error);
                 var cleanup = new List<RuntimeFailure>();
                 await StopContinuousWorkAsync(cleanup);
+                // 已经执行过 OnStarting 的模块先反序收到 OnStopping，再统一卸载。
                 await StopModulesAsync(cleanup);
                 var unloaded = await UnloadModulesAsync(cleanup);
                 failures.AddRange(cleanup);
-                host.SetState(unloaded && cleanup.Count == 0 ? RuntimeState.Stopped : RuntimeState.Hanging);
+                host.SetState(unloaded ? RuntimeState.Stopped : RuntimeState.Hanging);
                 throw new RuntimeExecutionException("Runtime 启动失败。", failures);
             }
         }
@@ -193,8 +199,13 @@ internal sealed class RuntimeLifecycle(RuntimeHost host, IReadOnlyList<ModuleDef
     }
 
     private async Task<bool> UnloadModulesAsync(List<RuntimeFailure> failures) {
+        var blocked = new HashSet<ModuleId>();
         for (var i = loaded.Count - 1; i >= 0; i--) {
             var module = loaded[i];
+            if (blocked.Contains(module)) {
+                continue;
+            }
+
             host.SetModuleAvailable(module, false);
             try {
                 await DispatchAsync(new RuntimeEvents.OnUnloading(module));
@@ -202,12 +213,12 @@ internal sealed class RuntimeLifecycle(RuntimeHost host, IReadOnlyList<ModuleDef
             }
             catch (Exception error) {
                 failures.AddRange(GetFailures(error, RuntimeFailureKind.Cleanup));
-                // 完整的安全清理计划尚未实现，失败后保留剩余卸载义务。
-                return false;
+                // 卸载失败的模块可能仍持有依赖资源，只继续清理无关模块。
+                blocked.UnionWith(host.Events.GetDependencies(module));
             }
         }
 
-        return true;
+        return loaded.Count == 0;
     }
 
     private void RestoreRunning() {
