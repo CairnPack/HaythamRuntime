@@ -3,6 +3,7 @@ using Haytham.Runtime.Modules;
 namespace Haytham.Runtime.Work;
 
 public sealed class ModuleWorkScope {
+    private readonly object gate = new();
     private readonly ContinuousWorkManager manager;
     private readonly ModuleId module;
     private bool open = true;
@@ -15,14 +16,20 @@ public sealed class ModuleWorkScope {
     public ContinuousWorkHandle Start(string name, Func<ContinuousWorkContext, ValueTask> operation) {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(operation);
-        if (!open) {
-            throw new RuntimeContractException("持续工作初始登记窗口已关闭。");
-        }
+        lock (gate) {
+            if (!open) {
+                throw new RuntimeContractException("持续工作初始登记窗口已关闭。");
+            }
 
-        return manager.Start(module, name, operation);
+            return manager.Start(module, name, operation);
+        }
     }
 
-    internal void Close() => open = false;
+    internal void Close() {
+        lock (gate) {
+            open = false;
+        }
+    }
 }
 
 public sealed class ContinuousWorkContext {

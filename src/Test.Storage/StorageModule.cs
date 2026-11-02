@@ -1,6 +1,7 @@
 using Haytham.Runtime.Events;
 using Haytham.Runtime.Modules;
 using Haytham.Runtime.Tasks;
+using Haytham.Runtime.Work;
 
 namespace Test.Storage;
 
@@ -19,6 +20,7 @@ internal sealed class StorageModule(TextWriter log) : IRuntimeModule {
     private ValueTask OnRegistering(RuntimeEvents.OnRegistering e, EventContext context) {
         e.Registry.RegisterEvent(new EventDefinition<StorageChangedEvent>("Storage changed", EventDispatchMode.ParallelJoin));
         e.Registry.Subscribe<RuntimeEvents.OnLoading>(OnLoading);
+        e.Registry.Subscribe<RuntimeEvents.OnStarting>(OnStarting);
         e.Registry.Subscribe<RuntimeEvents.OnUnloading>(OnUnloading);
         e.Registry.RegisterTask(new SaveValueTask(this));
         log.WriteLine($"[{e.TargetModule}] registered");
@@ -35,6 +37,25 @@ internal sealed class StorageModule(TextWriter log) : IRuntimeModule {
         store = null;
         log.WriteLine($"[{e.TargetModule}] unload: storage released");
         return ValueTask.CompletedTask;
+    }
+
+    private ValueTask OnStarting(RuntimeEvents.OnStarting e, EventContext context) {
+        e.ContinuousWork.Start("heartbeat", RunHeartbeatAsync);
+        return ValueTask.CompletedTask;
+    }
+
+    private async ValueTask RunHeartbeatAsync(ContinuousWorkContext context) {
+        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(100));
+        log.WriteLine("[Test.Storage] heartbeat started");
+        context.ReportReady();
+        try {
+            while (await timer.WaitForNextTickAsync(context.Stopping)) {
+                log.WriteLine("[Test.Storage] heartbeat");
+            }
+        }
+        finally {
+            log.WriteLine("[Test.Storage] heartbeat stopped");
+        }
     }
 
     internal bool Save(SaveValue input) {

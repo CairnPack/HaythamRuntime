@@ -4,6 +4,7 @@ namespace Haytham.Runtime.Work;
 
 internal sealed class ContinuousWorkManager(RuntimeHost host) {
     private readonly Dictionary<(ModuleId Module, string Name), Run> runs = [];
+    private readonly List<(ModuleId Module, Task Execution)> notifications = [];
 
     internal ModuleWorkScope OpenScope(ModuleId module) => new(this, module);
 
@@ -39,9 +40,16 @@ internal sealed class ContinuousWorkManager(RuntimeHost host) {
     }
 
     internal async Task StopAllAsync() {
-        var current = runs.Values.ToArray();
+        Run[] current;
+        (ModuleId Module, Task Execution)[] pendingNotifications;
+        lock (host.Gate) {
+            current = runs.Values.ToArray();
+            pendingNotifications = notifications.ToArray();
+            notifications.Clear();
+        }
+
         var failures = new List<RuntimeFailure>();
-        foreach (var run in current) {
+        foreach (var run in current.Where(static run => !run.Handle.Completion.IsCompleted)) {
             try {
                 run.Handle.RequestStop();
             }
@@ -50,12 +58,12 @@ internal sealed class ContinuousWorkManager(RuntimeHost host) {
             }
         }
 
-        foreach (var run in current) {
+        foreach (var notification in current.Select(static run => (run.Handle.Module, run.Execution)).Concat(pendingNotifications)) {
             try {
-                await run.Execution;
+                await notification.Execution;
             }
             catch (Exception error) {
-                failures.Add(new RuntimeFailure(RuntimeFailureKind.Execution, "持续工作故障通知失败。", error, run.Handle.Module));
+                failures.Add(new RuntimeFailure(RuntimeFailureKind.Execution, "持续工作故障通知失败。", error, notification.Module));
             }
         }
 
@@ -64,8 +72,26 @@ internal sealed class ContinuousWorkManager(RuntimeHost host) {
         }
     }
 
-    internal ContinuousWorkHandle Retry(ModuleId module, string name) =>
-        throw new NotImplementedException("持续工作故障收尾和重试尚未实现。");
+    internal ContinuousWorkHandle Retry(ModuleId module, string name) {
+        if (!runs.TryGetValue((module, name), out var previous)) {
+            throw new RuntimeContractException($"模块 {module} 未登记持续工作 {name}。");
+        }
+
+        if (!previous.Handle.Completion.IsCompleted) {
+            throw new RuntimeContractException($"模块 {module} 的持续工作 {name} 尚未结束。");
+        }
+
+        // 通知晚于 Completion，重试替换记录时仍须保留未结束或失败的通知路径。
+        notifications.RemoveAll(static notification => notification.Execution.IsCompletedSuccessfully);
+        if (!previous.Execution.IsCompletedSuccessfully) {
+            notifications.Add((module, previous.Execution));
+        }
+
+        var run = new Run(module, name, previous.Operation);
+        runs[(module, name)] = run;
+        run.Execution = Task.Run(() => ExecuteAsync(run));
+        return run.Handle;
+    }
 
     internal void NotifyFailure(ContinuousWorkFailure failure) => host.NotifyContinuousWorkFailure(failure);
 
@@ -73,7 +99,7 @@ internal sealed class ContinuousWorkManager(RuntimeHost host) {
         var failures = new List<RuntimeFailure>();
         try {
             var context = new ContinuousWorkContext(run.Stopping.Token, new ModuleWorkPort(host, run.Handle.Module),
-                () => run.Ready.TrySetResult());
+                run.ReportReady);
             await run.Operation(context);
         }
         catch (OperationCanceledException error) when (run.Stopping.IsCancellationRequested && error.CancellationToken == run.Stopping.Token) {
@@ -82,19 +108,24 @@ internal sealed class ContinuousWorkManager(RuntimeHost host) {
             failures.Add(new RuntimeFailure(RuntimeFailureKind.Execution, error.Message, error, run.Handle.Module));
         }
 
-        if (!run.Ready.Task.IsCompleted) {
-            var failure = new RuntimeFailure(RuntimeFailureKind.Execution, "持续工作在就绪前结束。", Module: run.Handle.Module);
-            run.Ready.TrySetException(new RuntimeExecutionException(failure.Message, failures.Count > 0 ? failures : [failure]));
-            if (!run.Stopping.IsCancellationRequested && failures.Count == 0) {
-                failures.Add(failure);
+        ContinuousWorkOutcome outcome;
+        lock (run.Gate) {
+            if (!run.Ready.Task.IsCompleted) {
+                var failure = new RuntimeFailure(RuntimeFailureKind.Execution, "持续工作在就绪前结束。", Module: run.Handle.Module);
+                run.Ready.TrySetException(new RuntimeExecutionException(failure.Message, failures.Count > 0 ? failures : [failure]));
+                if (!run.Stopping.IsCancellationRequested && failures.Count == 0) {
+                    failures.Add(failure);
+                }
             }
+
+            outcome = new ContinuousWorkOutcome(failures.Count > 0 ? ContinuousWorkOutcomeKind.Failed
+                : run.Stopping.IsCancellationRequested ? ContinuousWorkOutcomeKind.Stopped : ContinuousWorkOutcomeKind.Completed, failures);
+            run.Finished = true;
+            run.Stopping.Dispose();
         }
 
-        lock (run.Gate) {
-            var outcome = new ContinuousWorkOutcome(failures.Count > 0 ? ContinuousWorkOutcomeKind.Failed
-                : run.Stopping.IsCancellationRequested ? ContinuousWorkOutcomeKind.Stopped : ContinuousWorkOutcomeKind.Completed, failures);
+        lock (host.Gate) {
             run.Completion.SetResult(outcome);
-            run.Stopping.Dispose();
         }
 
         foreach (var failure in failures) {
@@ -115,10 +146,17 @@ internal sealed class ContinuousWorkManager(RuntimeHost host) {
         internal TaskCompletionSource Ready { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal TaskCompletionSource<ContinuousWorkOutcome> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal Task Execution { get; set; } = null!;
+        internal bool Finished { get; set; }
+
+        internal void ReportReady() {
+            lock (Gate) {
+                Ready.TrySetResult();
+            }
+        }
 
         private void RequestStop() {
             lock (Gate) {
-                if (!Completion.Task.IsCompleted) {
+                if (!Finished) {
                     Stopping.Cancel();
                 }
             }
