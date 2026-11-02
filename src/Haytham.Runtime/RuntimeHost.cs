@@ -150,14 +150,16 @@ public sealed partial class RuntimeHost {
             }
 
             lock (Gate) {
-                if (failure is null) {
-                    completion.SetResult();
-                }
-                else if (failure is OperationCanceledException canceled) {
-                    completion.SetCanceled(canceled.CancellationToken);
-                }
-                else {
-                    completion.SetException(failure);
+                switch (failure) {
+                    case null:
+                        completion.SetResult();
+                        break;
+                    case OperationCanceledException canceled:
+                        completion.SetCanceled(canceled.CancellationToken);
+                        break;
+                    default:
+                        completion.SetException(failure);
+                        break;
                 }
 
                 RemoveRoot(node.Id);
