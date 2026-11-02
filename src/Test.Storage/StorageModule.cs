@@ -1,0 +1,80 @@
+using Haytham.Runtime.Events;
+using Haytham.Runtime.Modules;
+using Haytham.Runtime.Tasks;
+using Haytham.Runtime.Work;
+
+namespace Test.Storage;
+
+public sealed record SaveValue(string Key, string Value);
+
+public sealed class StorageChangedEvent(string key) : RuntimeEvent {
+    public string Key { get; } = key;
+}
+
+[RuntimeModule]
+internal sealed class StorageModule(TextWriter log) : IRuntimeModule {
+    private Dictionary<string, string>? store;
+
+    public void Connect(ModuleWiring wiring) => wiring.SubscribeRegister(OnRegistering);
+
+    private ValueTask OnRegistering(RuntimeEvents.OnRegistering e, EventContext context) {
+        e.Registry.RegisterEvent(new EventDefinition<StorageChangedEvent>("Storage changed", EventDispatchMode.ParallelJoin));
+        e.Registry.Subscribe<RuntimeEvents.OnLoading>(OnLoading);
+        e.Registry.Subscribe<RuntimeEvents.OnStarting>(OnStarting);
+        e.Registry.Subscribe<RuntimeEvents.OnUnloading>(OnUnloading);
+        e.Registry.RegisterTask(new SaveValueTask(this));
+        log.WriteLine($"[{e.TargetModule}] registered");
+        return ValueTask.CompletedTask;
+    }
+
+    private ValueTask OnLoading(RuntimeEvents.OnLoading e, EventContext context) {
+        store = new Dictionary<string, string>();
+        log.WriteLine($"[{e.TargetModule}] load: storage opened");
+        return ValueTask.CompletedTask;
+    }
+
+    private ValueTask OnUnloading(RuntimeEvents.OnUnloading e, EventContext context) {
+        store = null;
+        log.WriteLine($"[{e.TargetModule}] unload: storage released");
+        return ValueTask.CompletedTask;
+    }
+
+    private ValueTask OnStarting(RuntimeEvents.OnStarting e, EventContext context) {
+        e.ContinuousWork.Start("heartbeat", RunHeartbeatAsync);
+        return ValueTask.CompletedTask;
+    }
+
+    private async ValueTask RunHeartbeatAsync(ContinuousWorkContext context) {
+        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(100));
+        log.WriteLine("[Test.Storage] heartbeat started");
+        context.ReportReady();
+        try {
+            while (await timer.WaitForNextTickAsync(context.Stopping)) {
+                log.WriteLine("[Test.Storage] heartbeat");
+            }
+        }
+        finally {
+            log.WriteLine("[Test.Storage] heartbeat stopped");
+        }
+    }
+
+    internal bool Save(SaveValue input) {
+        var replaced = store!.ContainsKey(input.Key);
+        store[input.Key] = input.Value;
+        return replaced;
+    }
+}
+
+public sealed partial class SaveValueTask : RuntimeTask<SaveValue, bool> {
+    private readonly StorageModule storage;
+
+    internal SaveValueTask(StorageModule storage) => this.storage = storage;
+
+    public override TaskExitPolicy ExitPolicy => TaskExitPolicy.Wait;
+
+    protected override async ValueTask<bool> ExecuteAsync(TaskEvent<SaveValue, bool> e) {
+        var replaced = storage.Save(e.Input);
+        await e.Work.PublishAsync(new StorageChangedEvent(e.Input.Key));
+        return replaced;
+    }
+}

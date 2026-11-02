@@ -3,7 +3,8 @@
 ## 项目结构
 
 - `src/Haytham.Runtime/`：Runtime 源码。
-- `src/Test/`：当前的手动验证项目，尚未接入正式测试框架。
+- `src/Haytham.Runtime.Generators/`：模块清单生成器（netstandard2.0），由 `src/Directory.Build.props` 向它传递 MSBuild 属性。
+- `src/Test/`、`src/Test.Storage/`：手动验证用的应用项目和它依赖的模块包，尚未接入正式测试框架。
 - `docs/`：需求与开发约束；行为或契约变化时同步更新。
 - `HaythamRuntime.slnx`：解决方案入口；不要提交 `bin/`、`obj/` 等构建产物。
 
@@ -21,7 +22,7 @@ dotnet run --project src/Test/Test.csproj
 
 ## 编码与文档
 
-遵循现有 C# 风格：4 个空格缩进，启用 nullable 和 implicit usings；公共成员使用 `PascalCase`，局部变量和参数使用 `camelCase`，接口以 `I` 开头。代码标识符、注释和 XML API 文档使用英文，需求与开发说明使用简体中文。架构、错误处理、资源所有权、日志和 NativeAOT 约束以 [`docs/development.md`](docs/development.md) 为准，不在本文件重复维护。
+遵循现有 C# 风格：4 个空格缩进，启用 nullable 和 implicit usings；公共成员使用 `PascalCase`，局部变量和参数使用 `camelCase`，接口以 `I` 开头。代码标识符使用英文；代码注释和 XML API 文档可以使用简体中文或英文；需求与开发说明使用简体中文。架构、错误处理、资源所有权、日志和 NativeAOT 约束以 [`docs/development.md`](docs/development.md) 为准，不在本文件重复维护。
 
 ## 提交与 Pull Request
 

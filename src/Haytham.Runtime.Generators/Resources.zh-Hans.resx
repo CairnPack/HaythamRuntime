@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <data name="HRT0001Title" xml:space="preserve"><value>运行时模块没有实现 IRuntimeModule</value></data>
+  <data name="HRT0001Message" xml:space="preserve"><value>“{0}”标注了 [RuntimeModule]，但没有实现 Haytham.Runtime.Modules.IRuntimeModule</value></data>
+  <data name="HRT0002Title" xml:space="preserve"><value>运行时模块无法实例化</value></data>
+  <data name="HRT0002Message" xml:space="preserve"><value>“{0}”标注了 [RuntimeModule]，但它是抽象类或静态类，Runtime 无法创建它的实例</value></data>
+  <data name="HRT0003Title" xml:space="preserve"><value>运行时模块不能是泛型类</value></data>
+  <data name="HRT0003Message" xml:space="preserve"><value>“{0}”标注了 [RuntimeModule]，但它是泛型类或嵌套在泛型类中，清单无法确定它的类型参数</value></data>
+  <data name="HRT0004Title" xml:space="preserve"><value>生成的代码无法访问运行时模块</value></data>
+  <data name="HRT0004Message" xml:space="preserve"><value>“{0}”标注了 [RuntimeModule]，但生成的代码无法访问它、包含它的类型或它唯一的实例构造函数</value></data>
+  <data name="HRT0006Title" xml:space="preserve"><value>项目声明了多个运行时模块</value></data>
+  <data name="HRT0006Message" xml:space="preserve"><value>“{0}”标注了 [RuntimeModule]，但本项目还声明了 {1}；一个模块包只能包含一个模块主类</value></data>
+  <data name="HRT0007Title" xml:space="preserve"><value>运行时模块声明了多个实例构造函数</value></data>
+  <data name="HRT0007Message" xml:space="preserve"><value>“{0}”标注了 [RuntimeModule]，但声明了多个实例构造函数；模块主类只能有一个实例构造函数</value></data>
+  <data name="HRT0008Title" xml:space="preserve"><value>运行时 Task 必须是 partial 类</value></data>
+  <data name="HRT0008Message" xml:space="preserve"><value>“{0}”是具体运行时 Task，但没有声明为 partial</value></data>
+  <data name="HRT0009Title" xml:space="preserve"><value>运行时 Task 必须是 sealed 类</value></data>
+  <data name="HRT0009Message" xml:space="preserve"><value>“{0}”是具体运行时 Task，但没有声明为 sealed</value></data>
+  <data name="HRT0010Title" xml:space="preserve"><value>运行时 Task 不能声明泛型参数</value></data>
+  <data name="HRT0010Message" xml:space="preserve"><value>“{0}”是具体运行时 Task，但声明了泛型参数</value></data>
+  <data name="HRT0011Title" xml:space="preserve"><value>运行时 Task 的外层类型必须是 partial 类型</value></data>
+  <data name="HRT0011Message" xml:space="preserve"><value>“{0}”包含具体运行时 Task，但没有声明为 partial</value></data>
+</root>

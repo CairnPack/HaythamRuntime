@@ -1,29 +1,69 @@
-﻿Console.WriteLine("Chapter 1: consumer flow sketch.");
+using Haytham.Runtime;
+using Haytham.Runtime.Generated;
+using Haytham.Runtime.Tasks;
+using Test;
+using Test.Storage;
 
-/*
- 1. 创建组装入口。
- var builder = new RuntimeBuilder();
- 提供配置，并接入由消费者持有的日志设施。
+var capabilities = new RuntimeCapabilities().Add<TextWriter>(Console.Out);
+var host = RuntimeApplication.Create(capabilities);
+Console.WriteLine($"state: {host.State}");
 
- 2. 将外部准备好的模块实例，作为参数传入通用注册入口。
- builder.AddModule(storageModule);
- builder.AddModule(installModule);
+await host.StartAsync();
+Console.WriteLine($"state: {host.State}");
 
- 3. 校验并冻结注册信息，然后创建 Runtime 实例。
- var runtime = builder.Build();
+var first = InstallTask.Submit(host, new InstallRequest("demo-pack"),
+    queueKey: "install", output: new ConsoleTaskOutput<InstallResult>("first"));
+var second = InstallTask.Submit(host, new InstallRequest("demo-pack-2"),
+    queueKey: "install", output: new ConsoleTaskOutput<InstallResult>("second"));
+foreach (var completion in await Task.WhenAll(first.Completion, second.Completion)) {
+    Console.WriteLine($"install result: {GetResult(completion)}");
+}
 
- 4. 等待加载与启动成功完成。
- await runtime.StartAsync();
+var save = SaveValueTask.Submit(host, new SaveValue("pack", "demo-pack"));
+Console.WriteLine($"save result: replaced = {GetResult(await save.Completion)}");
 
- 5. 提交安装请求，并取得它的实际执行结果。
- 通过 Runtime 管理的执行入口提交请求。
+await host.PreStopAsync();
+Console.WriteLine($"pre-stop state: {host.State}");
+host.CancelPreStop();
+Console.WriteLine($"cancel pre-stop state: {host.State}");
 
- 6. 应用决定停止时，向 Runtime 提出停止请求。
- var stopResult = await runtime.RequestStopAsync();
- 停止被否决时，Runtime 继续可用，应用不会因此结束。
- 停止成功表示必须等待的工作与清理都已完成。
- 失败时向调用方报告错误，不能假装 Runtime 已成功停止。
- 
- 7. 应用可通过 runtime.Kill() 强制结束线程
- 与 电脑断电时/线程被强制关闭 时行为一致
- */
+var firstStop = await host.StopAsync();
+Console.WriteLine($"stop: {firstStop.Kind}, state: {host.State}");
+save = SaveValueTask.Submit(host, new SaveValue("pack", "demo-pack-2"));
+Console.WriteLine($"save result after veto: replaced = {GetResult(await save.Completion)}");
+
+var secondStop = await host.StopAsync();
+Console.WriteLine($"stop: {secondStop.Kind}, state: {host.State}");
+
+try {
+    RuntimeApplication.Create(capabilities);
+    throw new Exception("第二次 Create 应当被拒绝。");
+}
+catch (RuntimeAlreadyCreatedException error) {
+    Console.WriteLine($"second create rejected: {error.Message}");
+}
+
+static TResult GetResult<TResult>(TaskCompletion<TResult> completion) {
+    if (completion.OutputFailure is { } outputFailure) {
+        throw new RuntimeExecutionException("样例输出失败。", [outputFailure]);
+    }
+
+    return completion.Business switch {
+        TaskOutcome<TResult>.Succeeded success => success.Result,
+        TaskOutcome<TResult>.Failed failure => throw new RuntimeExecutionException("样例 Task 失败。", failure.Failures),
+        TaskOutcome<TResult>.Canceled => throw new OperationCanceledException(),
+        _ => throw new Exception("未知 Task 结果。")
+    };
+}
+
+sealed class ConsoleTaskOutput<TResult>(string name) : ITaskOutputSink<TResult> {
+    public void ReportState(TaskExecutionState state) => Console.WriteLine($"[{name}] state: {state}");
+    public void ReportProgress(TaskProgress progress) =>
+        Console.WriteLine($"[{name}] progress: {progress.Phase} {progress.Done}/{progress.Total}");
+    public void ReportLog(TaskLogEntry entry) => Console.WriteLine($"[{name}] {entry.Message}");
+
+    public async ValueTask CompleteAsync(TaskOutcome<TResult> outcome) {
+        await Task.Delay(25);
+        Console.WriteLine($"[{name}] final output: {outcome}");
+    }
+}

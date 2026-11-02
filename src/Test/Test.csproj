@@ -5,9 +5,18 @@
         <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
+        <!-- 本项目承载 Runtime：生成器收集引用的模块包，生成 RuntimeApplication.Create。 -->
+        <HaythamRuntimeApplication>true</HaythamRuntimeApplication>
+        <!-- 把生成的源码写到 obj/.../generated 目录，方便直接在磁盘上查看。 -->
+        <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
     </PropertyGroup>
 
     <ItemGroup>
         <ProjectReference Include="..\Haytham.Runtime\Haytham.Runtime.csproj" />
+        <ProjectReference Include="..\Test.Storage\Test.Storage.csproj" />
+        <ProjectReference
+            Include="..\Haytham.Runtime.Generators\Haytham.Runtime.Generators.csproj"
+            OutputItemType="Analyzer"
+            ReferenceOutputAssembly="false" />
     </ItemGroup>
 </Project>
