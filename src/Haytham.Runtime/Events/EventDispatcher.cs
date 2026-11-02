@@ -58,27 +58,12 @@ internal sealed class EventDispatcher(RuntimeHost host, IReadOnlyList<ModuleDefi
         var problems = new List<string>();
         var mergedEvents = new Dictionary<Type, EventRegistration>(builtIns);
         var mergedTasks = new Dictionary<Type, TaskRegistration>();
-        var candidates = new List<Registry>();
-        var owners = new HashSet<ModuleId>();
-        var reservedNames = builtIns.Values.Select(static definition => definition.Name)
-            .Append(nameof(TaskEvent<,>)).Append(typeof(TaskEvent<,>).Name).ToHashSet(StringComparer.Ordinal);
         foreach (var registry in registries) {
-            if (registry.Owner != this || !registry.IsAccepted || !dependencies.ContainsKey(registry.Module)
-                || !owners.Add(registry.Module)) {
-                problems.Add($"模块 {registry.Module} 的 Registry 不属于本宿主的有效注册执行，或重复接受清单。");
-                continue;
-            }
-
-            candidates.Add(registry);
             foreach (var definition in registry.Events) {
                 if (typeof(LifecycleEvent).IsAssignableFrom(definition.Type) || IsTaskEvent(definition.Type)) {
                     problems.Add($"事件 {definition.Type.FullName} 不能覆盖内置事件。");
                 }
                 else {
-                    if (reservedNames.Contains(definition.Name)) {
-                        problems.Add($"事件 {definition.Type.FullName} 冒用内置保留名称 {definition.Name}。");
-                    }
-
                     if (!mergedEvents.TryAdd(definition.Type, definition)) {
                         problems.Add($"事件 {definition.Type.FullName} 重复定义。");
                     }
@@ -92,11 +77,7 @@ internal sealed class EventDispatcher(RuntimeHost host, IReadOnlyList<ModuleDefi
             }
         }
 
-        foreach (var module in dependencies.Keys.Where(module => !owners.Contains(module))) {
-            problems.Add($"模块 {module} 没有有效的注册清单。");
-        }
-
-        var mergedSubscriptions = candidates.SelectMany(static registry => registry.Subscriptions).ToArray();
+        var mergedSubscriptions = registries.SelectMany(static registry => registry.Subscriptions).ToArray();
         foreach (var subscription in mergedSubscriptions) {
             if (subscription.Type == typeof(RuntimeEvents.OnRegistering) || IsTaskEvent(subscription.Type)) {
                 problems.Add($"不能通过 Registry 订阅 {subscription.Type.Name}。");
@@ -119,7 +100,7 @@ internal sealed class EventDispatcher(RuntimeHost host, IReadOnlyList<ModuleDefi
 
     internal void CheckPublish(ModuleId module, RuntimeEvent e) {
         var current = Volatile.Read(ref plan);
-        if (current is null || e.IsBuiltIn || !current.Events.TryGetValue(e.GetType(), out var definition) || definition.Module != module) {
+        if (current is null || !current.Events.TryGetValue(e.GetType(), out var definition) || definition.Module != module) {
             throw new RuntimeContractException($"模块 {module} 不能发布事件 {e.GetType().Name}。");
         }
     }
@@ -156,7 +137,7 @@ internal sealed class EventDispatcher(RuntimeHost host, IReadOnlyList<ModuleDefi
             EventDispatchMode.SerialCollect => DispatchSerialAsync(e, node, participants, true, onHandlerReturned),
             EventDispatchMode.ParallelJoin => DispatchParallelAsync(e, node, participants, null),
             EventDispatchMode.ParallelFailFast => DispatchParallelAsync(e, node, participants, onFailure),
-            _ => throw new RuntimeContractException("事件派发方式无效。")
+            _ => throw new ArgumentOutOfRangeException()
         };
     }
 
@@ -164,7 +145,8 @@ internal sealed class EventDispatcher(RuntimeHost host, IReadOnlyList<ModuleDefi
         bool collect, Action? onHandlerReturned) {
         var failures = new List<RuntimeFailure>();
         var canceled = false;
-        foreach (var participant in participants) {
+        for (var i = 0; i < participants.Length; i++) {
+            var participant = participants[i];
             try {
                 await parent.RunChild(e.GetType().Name, participant.Module, async child => {
                     if (e is RuntimeEvents.OnRegistering registering) {
@@ -175,8 +157,10 @@ internal sealed class EventDispatcher(RuntimeHost host, IReadOnlyList<ModuleDefi
                         await participant.Invoke(e, new EventContext(child));
                     }
                     finally {
-                        // 注册和持续工作窗口在处理器返回时关闭，不能等到后代结束才关闭。
-                        onHandlerReturned?.Invoke();
+                        // 本模块最后一个处理器返回时关闭窗口，不等待它的后代结束。
+                        if (i == participants.Length - 1) {
+                            onHandlerReturned?.Invoke();
+                        }
                     }
 
                     return true;

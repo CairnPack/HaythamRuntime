@@ -6,7 +6,6 @@ public abstract class LifecycleEvent : RuntimeEvent {
     private protected LifecycleEvent(ModuleId targetModule) => TargetModule = targetModule;
 
     public ModuleId TargetModule { get; }
-    internal override bool IsBuiltIn => true;
 }
 
 public abstract class CancelableLifecycleEvent : LifecycleEvent {

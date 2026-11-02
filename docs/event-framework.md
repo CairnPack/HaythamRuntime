@@ -547,7 +547,7 @@ public sealed class WorkScope
 
 ### 接纳、排队和取消
 
-10. 提交先查找定义、检查类型及提供模块状态，再原子完成根准入检查和执行登记。接纳失败抛契约错误，不产生 TaskRun 或输出事件。
+10. 提交先检查根准入，再查找定义、检查类型，并原子完成执行登记。接纳失败抛契约错误，不产生 TaskRun 或输出事件。
 
 11. 提交不在调用线程执行业务，包括 `ExecuteAsync` 第一个 `await` 之前的同步代码。
 
@@ -798,8 +798,8 @@ public interface IRuntimeTerminationStrategy
 
     1. 关闭根准入，进入 StopRequested。
     2. 定向、串行执行完整 OnStopRequested 判定名单，等待必要工作。
-    3. 有处理器错误：返回 DecisionFailed，暂按用户 4.1 的 A 恢复运行和有效准入。
-    4. 无错误但有否决：返回 Vetoed，恢复运行和有效准入。
+    3. 有处理器错误：返回 DecisionFailed，暂按用户 4.1 的 A 恢复到停止前的状态：从 Running 发起的回到 Running 并重新开放准入；从 PreStopping 发起的回到 PreStopping，准入保持关闭，因为否决只撤销这次正式停止，预退出仍然有效。
+    4. 无错误但有否决：返回 Vetoed，按上一步同样的规则恢复。
     5. 无错误、无否决：进入 Draining，保持根准入关闭。
     6. 取得本次排空开始时尚未完成的根 Task 和根事件执行，等待真实结束；Task 等唯一 Completion。
     7. 进入不可逆 Stopping，向全部持续工作请求结束，再等待；执行各模块 OnStopping 的必要收尾。

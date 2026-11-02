@@ -68,13 +68,7 @@ public sealed partial class RuntimeHost {
 
     public TaskRun<TResult> Submit<TTask, TInput, TResult>(TInput input, string? queueKey = null,
         ITaskOutputSink<TResult>? output = null, CancellationToken cancellation = default)
-        where TTask : RuntimeTask<TInput, TResult> {
-        if (Events is null) {
-            throw new RuntimeContractException("Runtime 尚未启动，不能提交 Task。");
-        }
-
-        return tasks.Submit<TTask, TInput, TResult>(input, queueKey, output, cancellation);
-    }
+        where TTask : RuntimeTask<TInput, TResult> => tasks.Submit<TTask, TInput, TResult>(input, queueKey, output, cancellation);
 
     public ContinuousWorkHandle RetryContinuousWork(ModuleId module, string name) {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);

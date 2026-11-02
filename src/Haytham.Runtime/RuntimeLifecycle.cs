@@ -40,7 +40,7 @@ internal sealed class RuntimeLifecycle(RuntimeHost host, IReadOnlyList<ModuleDef
 
                 var registries = new List<Registry>();
                 foreach (var module in modules) {
-                    var registry = new Registry(host.Events, module.Id);
+                    var registry = new Registry(module.Id);
                     try {
                         await DispatchAsync(new RuntimeEvents.OnRegistering(module.Id, registry), registry.Close);
                     }
@@ -48,7 +48,6 @@ internal sealed class RuntimeLifecycle(RuntimeHost host, IReadOnlyList<ModuleDef
                         registry.Close();
                     }
 
-                    registry.Accept();
                     registries.Add(registry);
                 }
 
@@ -193,6 +192,11 @@ internal sealed class RuntimeLifecycle(RuntimeHost host, IReadOnlyList<ModuleDef
     }
 
     internal void Kill() {
+        if (host.State is not (RuntimeState.Running or RuntimeState.PreStopping or RuntimeState.StopRequested
+            or RuntimeState.Draining or RuntimeState.Stopping or RuntimeState.Unloading or RuntimeState.Hanging)) {
+            throw new RuntimeContractException($"当前状态为 {host.State}，不能调用 {nameof(Kill)}。");
+        }
+
         try {
             capabilities.Require<IRuntimeTerminationStrategy>().Terminate();
         }
@@ -217,10 +221,8 @@ internal sealed class RuntimeLifecycle(RuntimeHost host, IReadOnlyList<ModuleDef
             try {
                 await root.Completion;
             }
-            catch (OperationCanceledException) when (root.Completion.IsCanceled) {
-            }
-            catch (Exception error) {
-                failures.AddRange(GetFailures(error));
+            catch (Exception) {
+                // 根事件的执行失败由原调用方接收，排空只等待实际结束。
             }
 
             if (root.GetOutputFailure() is { } outputFailure) {
@@ -296,6 +298,8 @@ internal sealed class RuntimeLifecycle(RuntimeHost host, IReadOnlyList<ModuleDef
 
     private static List<RuntimeFailure> GetFailures(Exception error, RuntimeFailureKind kind = RuntimeFailureKind.Execution) =>
         error is RuntimeExecutionException execution
-            ? execution.Failures.Select(failure => kind == RuntimeFailureKind.Execution ? failure : failure with { Kind = kind }).ToList()
-            : [new RuntimeFailure(error is RuntimeContractException ? RuntimeFailureKind.Contract : kind, error.Message, error)];
+            ? execution.Failures.Select(failure => kind != RuntimeFailureKind.Execution && failure.Kind == RuntimeFailureKind.Execution
+                ? failure with { Kind = kind } : failure).ToList()
+            : [new RuntimeFailure(error is RuntimeContractException or RuntimeConfigurationException
+                ? RuntimeFailureKind.Contract : kind, error.Message, error)];
 }

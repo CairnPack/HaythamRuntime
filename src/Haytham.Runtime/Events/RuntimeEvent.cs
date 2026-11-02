@@ -2,8 +2,6 @@ namespace Haytham.Runtime.Events;
 
 public abstract class RuntimeEvent {
     protected RuntimeEvent() { }
-
-    internal virtual bool IsBuiltIn => false;
 }
 
 public delegate ValueTask RuntimeEventHandler<TEvent>(TEvent e, EventContext context)

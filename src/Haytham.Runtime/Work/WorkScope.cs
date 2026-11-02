@@ -38,7 +38,8 @@ public sealed class WorkScope {
         where TTask : RuntimeTask<TInput, TResult> {
         var registration = node.Host.Events.GetTask<TTask, TInput, TResult>();
         return new ValueTask<TResult>(node.RunChild(registration.Task.Name, registration.Module,
-            child => node.Host.Events.ExecuteTaskAsync((RuntimeTask<TInput, TResult>)registration.Task, input, child)));
+            child => node.Host.Events.ExecuteTaskAsync((RuntimeTask<TInput, TResult>)registration.Task, input, child),
+            node.Output ?? new TaskOutput(static _ => { }, static _ => { })));
     }
 }
 

@@ -5,17 +5,11 @@ namespace Haytham.Runtime.Events;
 
 public sealed class Registry {
     private bool open;
-    private bool accepted;
     private WorkNode? execution;
 
-    internal Registry(EventDispatcher owner, ModuleId module) {
-        Owner = owner;
-        Module = module;
-    }
+    internal Registry(ModuleId module) => Module = module;
 
-    internal EventDispatcher Owner { get; }
     internal ModuleId Module { get; }
-    internal bool IsAccepted => accepted && !open;
     internal List<TaskRegistration> Tasks { get; } = [];
     internal List<EventRegistration> Events { get; } = [];
     internal List<EventSubscription> Subscriptions { get; } = [];
@@ -49,8 +43,6 @@ public sealed class Registry {
     }
 
     internal void Close() => open = false;
-
-    internal void Accept() => accepted = true;
 
     private void RequireOpen() {
         if (!open) {

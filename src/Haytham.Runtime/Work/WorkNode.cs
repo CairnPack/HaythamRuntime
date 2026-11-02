@@ -32,14 +32,15 @@ internal sealed class WorkNode {
     internal CancellationToken Cancellation { get; }
     internal TaskOutput? Output { get; }
 
-    internal Task<T> RunChild<T>(string name, ModuleId module, Func<WorkNode, ValueTask<T>> operation) {
-        var child = RegisterChild(name, module, operation);
+    internal Task<T> RunChild<T>(string name, ModuleId module, Func<WorkNode, ValueTask<T>> operation,
+        TaskOutput? output = null) {
+        var child = RegisterChild(name, module, operation, output);
         child.Start();
         return child.Completion;
     }
 
     internal (Task<T> Completion, Task<RuntimeExecutionException> Failure, Action Start) RegisterChild<T>(
-        string name, ModuleId module, Func<WorkNode, ValueTask<T>> operation) {
+        string name, ModuleId module, Func<WorkNode, ValueTask<T>> operation, TaskOutput? output = null) {
         WorkNode child;
         var completion = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
         lock (gate) {
@@ -47,7 +48,7 @@ internal sealed class WorkNode {
                 throw new RuntimeContractException($"工作登记窗口已关闭，不能登记 {name}。");
             }
 
-            child = new WorkNode(Host, module, Cancellation, Output, this);
+            child = new WorkNode(Host, module, Cancellation, output ?? Output, this);
             children.Add(completion.Task);
         }
 
@@ -71,7 +72,6 @@ internal sealed class WorkNode {
         var canceled = false;
         Exception? operationFailure = null;
         T result = default!;
-        var previous = Host.CurrentWork.Value;
         Host.CurrentWork.Value = this;
         try {
             result = await operation(this);
@@ -83,7 +83,6 @@ internal sealed class WorkNode {
             operationFailure = error;
         }
         finally {
-            Host.CurrentWork.Value = previous;
             lock (gate) {
                 open = false;
             }

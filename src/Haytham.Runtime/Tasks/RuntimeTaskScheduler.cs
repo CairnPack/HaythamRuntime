@@ -17,8 +17,8 @@ internal sealed class RuntimeTaskScheduler(RuntimeHost host) {
         var queued = false;
         RuntimeTask<TInput, TResult> task;
         lock (host.Gate) {
-            var registration = host.Events.GetTask<TTask, TInput, TResult>();
             host.RequireRootAdmission();
+            var registration = host.Events.GetTask<TTask, TInput, TResult>();
             task = (RuntimeTask<TInput, TResult>)registration.Task;
             node = new WorkNode(host, registration.Module, cancellation, reports);
             run = new TaskRun<TResult>(node.Id, node.RequestCancellation);
@@ -91,11 +91,12 @@ internal sealed class RuntimeTaskScheduler(RuntimeHost host) {
                 run.Complete(new TaskCompletion<TResult>(outcome, outputFailure));
                 host.RemoveRoot(node.Id);
                 if (position?.List is { } queue) {
+                    var wasFirst = queue.First == position;
                     queue.Remove(position);
-                    if (queue.First is { } next) {
+                    if (wasFirst && queue.First is { } next) {
                         next.Value.SetResult(true);
                     }
-                    else {
+                    else if (queue.Count == 0) {
                         queues.Remove(queueKey!);
                     }
                 }

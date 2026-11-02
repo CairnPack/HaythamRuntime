@@ -29,10 +29,6 @@ internal sealed class ContinuousWorkManager(RuntimeHost host) {
 
     internal void ConfirmReady() {
         foreach (var run in runs.Values) {
-            if (!run.Handle.Ready.IsCompletedSuccessfully) {
-                throw new RuntimeContractException("持续工作尚未就绪。");
-            }
-
             if (run.Handle.Completion.IsCompletedSuccessfully && run.Handle.Completion.Result.Kind == ContinuousWorkOutcomeKind.Failed) {
                 throw new RuntimeExecutionException("持续工作不再满足启动条件。", run.Handle.Completion.Result.Failures);
             }

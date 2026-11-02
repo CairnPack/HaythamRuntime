@@ -17,5 +17,4 @@ public sealed class TaskEvent<TInput, TResult> : RuntimeEvent {
     public CancellationToken Cancellation { get; }
     public WorkScope Work { get; }
     public TaskOutput Output { get; }
-    internal override bool IsBuiltIn => true;
 }
