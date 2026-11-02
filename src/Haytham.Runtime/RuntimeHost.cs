@@ -174,4 +174,5 @@ public sealed partial class RuntimeHost {
     internal void NotifyContinuousWorkFailure(ContinuousWorkFailure failure) => ContinuousWorkFailed?.Invoke(failure);
 }
 
-internal sealed record RootExecution(Task Completion, Func<RuntimeFailure?> GetOutputFailure);
+internal sealed record RootExecution(Task Completion, Func<RuntimeFailure?> GetOutputFailure,
+    Action? RequestExitCancellation = null);

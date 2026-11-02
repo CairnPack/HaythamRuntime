@@ -96,12 +96,50 @@ internal sealed class RuntimeLifecycle(RuntimeHost host, IReadOnlyList<ModuleDef
         }
     }
 
-    internal Task PreStopAsync() => throw new NotImplementedException("可撤销的预退出和 CancelOnExit 政策尚未实现。");
+    internal Task PreStopAsync() {
+        Begin(nameof(PreStopAsync), RuntimeState.Running);
+        try {
+            RootExecution[] roots;
+            lock (host.Gate) {
+                host.SetAdmission(false);
+                host.SetState(RuntimeState.PreStopping);
+                roots = host.SnapshotRoots();
+            }
 
-    internal void CancelPreStop() => throw new NotImplementedException("预退出撤销尚未实现。");
+            var failures = new List<RuntimeFailure>();
+            foreach (var root in roots) {
+                try {
+                    root.RequestExitCancellation?.Invoke();
+                }
+                catch (Exception error) {
+                    failures.AddRange(GetFailures(error));
+                }
+            }
 
-    internal async Task<StopOutcome> StopAsync() {
+            return failures.Count == 0 ? Task.CompletedTask
+                : Task.FromException(new RuntimeExecutionException("预退出取消请求未全部完成。", failures));
+        }
+        finally {
+            End();
+        }
+    }
+
+    internal void CancelPreStop() {
+        Begin(nameof(CancelPreStop), RuntimeState.PreStopping);
+        try {
+            RestoreState(RuntimeState.Running);
+        }
+        finally {
+            End();
+        }
+    }
+
+    internal Task<StopOutcome> StopAsync() {
         Begin(nameof(StopAsync), RuntimeState.Running, RuntimeState.PreStopping);
+        return StopCoreAsync(host.State);
+    }
+
+    private async Task<StopOutcome> StopCoreAsync(RuntimeState previousState) {
         try {
             lock (host.Gate) {
                 host.SetAdmission(false);
@@ -123,17 +161,22 @@ internal sealed class RuntimeLifecycle(RuntimeHost host, IReadOnlyList<ModuleDef
             }
 
             if (failures.Count > 0) {
-                RestoreRunning();
+                RestoreState(previousState);
                 return new StopOutcome(StopOutcomeKind.DecisionFailed, failures);
             }
 
             if (vetoed) {
-                RestoreRunning();
+                RestoreState(previousState);
                 return new StopOutcome(StopOutcomeKind.Vetoed, []);
             }
 
-            host.SetState(RuntimeState.Draining);
-            await DrainAsync(host.SnapshotRoots(), failures);
+            RootExecution[] roots;
+            lock (host.Gate) {
+                host.SetState(RuntimeState.Draining);
+                roots = host.SnapshotRoots();
+            }
+
+            await DrainAsync(roots, failures);
 
             host.SetState(RuntimeState.Stopping);
             await StopContinuousWorkAsync(failures);
@@ -149,7 +192,17 @@ internal sealed class RuntimeLifecycle(RuntimeHost host, IReadOnlyList<ModuleDef
         }
     }
 
-    internal void Kill() => throw new NotImplementedException("终止策略调用及终止未完成的错误报告尚未实现。");
+    internal void Kill() {
+        try {
+            capabilities.Require<IRuntimeTerminationStrategy>().Terminate();
+        }
+        catch (Exception error) {
+            throw new RuntimeExecutionException("Runtime 终止未完成。", GetFailures(error));
+        }
+
+        throw new RuntimeExecutionException("Runtime 终止未完成。",
+            [new RuntimeFailure(RuntimeFailureKind.Execution, "终止策略意外返回。")]);
+    }
 
     private async Task DispatchAsync(LifecycleEvent e, Action? onHandlerReturned = null) {
         var node = new WorkNode(host, e.TargetModule, CancellationToken.None, null);
@@ -221,10 +274,10 @@ internal sealed class RuntimeLifecycle(RuntimeHost host, IReadOnlyList<ModuleDef
         return loaded.Count == 0;
     }
 
-    private void RestoreRunning() {
+    private void RestoreState(RuntimeState state) {
         lock (host.Gate) {
-            host.SetState(RuntimeState.Running);
-            host.SetAdmission(true);
+            host.SetState(state);
+            host.SetAdmission(state == RuntimeState.Running);
         }
     }
 

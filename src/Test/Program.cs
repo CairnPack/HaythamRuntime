@@ -22,6 +22,11 @@ foreach (var completion in await Task.WhenAll(first.Completion, second.Completio
 var save = host.Submit<SaveValueTask, SaveValue, bool>(new SaveValue("pack", "demo-pack"));
 Console.WriteLine($"save result: replaced = {GetResult(await save.Completion)}");
 
+await host.PreStopAsync();
+Console.WriteLine($"pre-stop state: {host.State}");
+host.CancelPreStop();
+Console.WriteLine($"cancel pre-stop state: {host.State}");
+
 var firstStop = await host.StopAsync();
 Console.WriteLine($"stop: {firstStop.Kind}, state: {host.State}");
 save = host.Submit<SaveValueTask, SaveValue, bool>(new SaveValue("pack", "demo-pack-2"));
