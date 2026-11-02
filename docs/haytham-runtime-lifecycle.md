@@ -8,7 +8,7 @@ Haytham Core（HC）和 Gebinde 的消费者需要一个可嵌入的独立运行
 
 本篇记录 2026-10-30 讨论已经对齐的分层方向，并给出可继续修改的生命周期概览。用户已确认以此形成草稿；具体接口、状态名和调度细则不是已完成的实现或全部定案的契约。本篇在 docs 中继续修改和定稿，不代表已经完成运行时实现。
 
-2026-10-31 最新澄清：一个进程只允许一个 RuntimeHost；启动器与 CLI 分属不同进程。采用编译期生成模块清单、运行时自动组装，消费者不逐个创建模块。无参数 RuntimeModule 特性标记模块主类；2026-11-01 起，模块的 Id、版本、作者和说明改为来自模块项目的 csproj，不再手写静态 Descriptor（见[模块清单与 NativeAOT](module-entry-aot.md)）。Runtime 先登记内置 RegisterEvent、TaskEvent，再接好模块订阅、锁定模块名单；RegisterEvent 收集 Registry，校验合并后第二次锁定。TaskEvent 与模块 Event 使用同一机制，每次 Task 执行具有独立信道。
+2026-10-31 最新澄清：一个进程只允许一个 RuntimeHost；启动器与 CLI 分属不同进程。采用编译期生成模块清单、运行时自动组装，消费者不逐个创建模块。无参数 RuntimeModule 特性标记模块主类；2026-11-01 起，模块的 Id、版本、作者和说明改为来自模块项目的 csproj，不再手写静态 Descriptor（见[模块清单与 NativeAOT](module-entry-aot.md)）。Runtime 先登记内置 OnRegistering、TaskEvent，再接好模块订阅、锁定模块名单；OnRegistering 收集 Registry，校验合并后第二次锁定。TaskEvent 与模块 Event 使用同一机制，每次 Task 执行具有独立信道。
 
 ## 分层与生命周期
 
@@ -17,7 +17,7 @@ Haytham Core（HC）和 Gebinde 的消费者需要一个可嵌入的独立运行
 - HaythamRuntime 提供独立、可嵌入的 Runtime 宿主，由它宏观组织模块与受托管工作的生命周期。消费者不必重新实现这套基础设施。
 - HC 和 Gebinde 的模块通过编译期清单接入同一个运行环境；清单的导出与收集方式已确定，尚未实现。两库仍互不引用，Runtime 不认识产品业务。其他语言的程序使用预先编译的 hc、gebinde、full 三种原生库，full 里包含 HC Store 到 Gebinde 的转接。
 - 模块注册生命周期挂载点、发布业务事件，并提供挂载点内可调用的完整业务能力。调用方声明业务意图，不重新实现下载、安装等标准算法，也不逐项转发所有库方法。
-- 模块订阅 RegisterEvent，提交含 Task 触发契约、行为与返回，以及模块 Event 定义和绑定的 Registry，由 Runtime 校验合并。Registry 接口待定。Event 包含自身生命周期和载入点，业务由订阅者实现；载入点及基元 Event／派发器／事件对象的具体分工待定。
+- 模块订阅 OnRegistering，提交含 Task 触发契约、行为与返回，以及模块 Event 定义和绑定的 Registry，由 Runtime 校验合并。Registry 和事件框架的接口见 [Event 框架规格](event-framework.md)。
 - Runtime 通过同一 Event 机制提供并注册 TaskEvent，任务池管理每次 Task 执行；每次执行的 TaskEvent 信道、内部短程工作、取消状态和结果各有归属，不互相混用。
 - 对应业务初始化只在实际注册的对应事件执行时发生；模块构造、注入及登记定义本身不自动初始化业务，不要求每个模块都有初始化事件或统一强制回调。
 - 调用方后端选择能力并通过挂载点组装产品业务，接收前端触发输入；前端提交操作并展示状态、结果和错误。
@@ -46,9 +46,9 @@ Gebinde CLI 和第三方消费者可以没有图形前端，但仍使用同样�
 
 ```text
 确保进程唯一 RuntimeHost → 建立最小 Event 能力
-  → 直接登记内置 RegisterEvent、TaskEvent
-  → 读取生成清单、创建模块并接好 RegisterEvent 订阅 → 锁定模块名单
-  → 执行 RegisterEvent → 等待订阅者提交 Registry → 校验合并 Task／Event
+  → 直接登记内置 OnRegistering、TaskEvent
+  → 读取生成清单、创建模块并接好 OnRegistering 订阅 → 锁定模块名单
+  → 执行 OnRegistering → 等待订阅者提交 Registry → 校验合并 Task／Event
   → 两类注册完成，锁定结果
   → 加载 → 启动 → 运行
   → 请求 Stop
@@ -59,8 +59,8 @@ Gebinde CLI 和第三方消费者可以没有图形前端，但仍使用同样�
 | 阶段 | 工作与完成条件 |
 |---|---|
 | 创建 | 保证进程唯一实例，接入配置与日志；重复入口行为待定。 |
-| 引导与模块接入 | 建立最小 Event 能力并直接登记内置 RegisterEvent、TaskEvent；读取生成清单、校验描述与构造条件、创建模块并接线，然后锁定名单。 |
-| Task／Event 注册 | 执行 RegisterEvent，等待订阅者提交 Registry，校验合并两类定义与绑定，拒绝冲突及覆盖内置事件，然后锁定注册结果。 |
+| 引导与模块接入 | 建立最小 Event 能力并直接登记内置 OnRegistering、TaskEvent；读取生成清单、校验描述与构造条件、创建模块并接线，然后锁定名单。 |
+| Task／Event 注册 | 执行 OnRegistering，等待订阅者提交 Registry，校验合并两类定义与绑定，拒绝冲突及覆盖内置事件，然后锁定注册结果。 |
 | 加载 | 注册结果锁定后按依赖推进；业务初始化仅在实际注册的对应事件执行时发生，完成该事件要求等待的工作。 |
 | 启动 | 让已加载模块进入可执行状态，启动所需的持续工作；启动完成不要求持续工作已经结束。 |
 | 运行 | 外部输入匹配 Task，由任务池管理本次执行，通过独立 TaskEvent 信道组织内部短程工作并返回结果；模块 Event 使用相同执行机制。 |
@@ -164,7 +164,7 @@ TaskEvent 使用与模块 Event 相同的机制。每次执行的数据、取消
 ### 一个贯穿分层的业务例子
 
 1. 调用方引用所需模块包，配置跨库能力、日志和环境；构建生成聚合清单，Runtime 自动组装模块。
-2. Runtime 先登记内置事件、接好 RegisterEvent 订阅，再锁定模块名单，执行 RegisterEvent 收集 Registry；校验合并并锁定结果后，按实际生命周期依赖加载与启动。
+2. Runtime 先登记内置事件、接好 OnRegistering 订阅，再锁定模块名单，执行 OnRegistering 收集 Registry；校验合并并锁定结果后，按实际生命周期依赖加载与启动。
 3. 前端提交安装整合包的位置和选项，后端转换为明确安装请求。
 4. Runtime 匹配安装 Task，为本次执行建立独立 TaskEvent 信道。Gebinde 的订阅者执行业务，在挂载点接受产品规则；需要 HC 能力时通过转接使用。
 5. 本次内部短程工作在其信道内流转，Runtime 通过任务池和统一 Event 机制管理执行、等待与取消。后端将本次进度与结果桥接给前端。
@@ -172,7 +172,7 @@ TaskEvent 使用与模块 Event 相同的机制。每次执行的数据、取消
 
 ### 后续细化与文档维护
 
-实施顺序以[手写教程总纲](runtime-authoring-roadmap.md)为准：先建立 RuntimeHost 状态外壳并明确进程唯一性，再接入静态模块描述、资格标记、生成清单、自动组装、Event 执行基础和 RegisterEvent／Registry，两次锁定后接通加载启动；随后完善 TaskEvent 信道、停止与卸载。运行实例不等于专用线程，状态外壳不允许跳过事件初始化。保留用户笔记；清单协议、创建规则、注册 API 与包布局仍待具体设计，基本失败处理随功能首次实现同步补入。
+实施顺序以[手写教程总纲](runtime-authoring-roadmap.md)为准：先建立 RuntimeHost 状态外壳并明确进程唯一性，再接入静态模块描述、资格标记、生成清单、自动组装、Event 执行基础和 OnRegistering／Registry，两次锁定后接通加载启动；随后完善 TaskEvent 信道、停止与卸载。运行实例不等于专用线程，状态外壳不允许跳过事件初始化。保留用户笔记；清单协议、创建规则、注册 API 与包布局仍待具体设计，基本失败处理随功能首次实现同步补入。
 
 本篇是 HaythamRuntime 仓库的需求与生命周期工作稿，由根目录 README 链接。后续 Runtime 设计在本仓库继续修订；Launcher 仓库保留迁入时的讨论材料与产品集成记录。文档定稿不代表代码实现。
 

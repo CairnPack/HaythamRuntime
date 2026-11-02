@@ -4,7 +4,7 @@
 
 ## 仓库与实现状态
 
-- `HaythamRuntime.slnx` 已包含 Runtime 类库、`Haytham.Runtime.Generators` 模块清单生成器（netstandard2.0）与 Test、Test.Storage 手动验证项目，源码放在 `src/`。生命周期主线已有可运行的骨架，写法见 [Event 框架骨架](event-framework.md)；运行 Test 只证明主线能走通，不能证明生命周期契约已经全部验证。
+- `HaythamRuntime.slnx` 已包含 Runtime 类库、`Haytham.Runtime.Generators` 模块清单生成器（netstandard2.0）与 Test、Test.Storage 手动验证项目，源码放在 `src/`。事件框架已经按 [Event 框架规格](event-framework.md) 实现；运行 Test 只证明主线能走通，不能证明生命周期契约已经全部验证，因为还没有正式测试。
 - 初始化时使用 .NET SDK `10.0.403`，现有两个项目目标框架为 `net10.0`。主要消费者使用 .NET 10 和 NativeAOT；SDK 锁定与发布平台仍需随验证明确。
 - 当前许可证由根目录 `LICENSE` 定义为 MIT。不将消费者仓库的许可证、构建配置或发布规则直接套入本仓库。
 - 文档使用简体中文；代码标识符使用英文；代码注释及 XML API 文档可以使用简体中文或英文。
@@ -17,11 +17,11 @@
 - 模块通过构造函数获得外部对象。外部对象统一放在能力表（暂名 `RuntimeCapabilities`）里按类型存取，生成器按构造函数参数生成取值代码；只能有一个构造函数，不猜参数，缺少时在创建任何模块之前一次列出全部缺项，不传 null。构造函数暂不接收其他模块提供的服务。DI 只在组装入口使用，业务代码里不使用服务定位器。
 - Runtime 不再引用 Semver，模块版本就是 NuGet 包版本，以字符串保存，格式由生成器在构建时按 SemVer 2.0 检查。
 - 一个模块包只含一个模块主类，模块包之间的 NuGet 依赖就是初始化依赖；普通工具包没有模块，不进入加载顺序。模块包构建时，生成器从编译引用中找出依赖的其他模块，把它们的 Id 记进本包的清单特性；应用构建时合并这些记录并排序。PackageReference 和 ProjectReference 因此等价，不读取 `project.assets.json`。重复 Id、缺少依赖和成环在构建时报错。Runtime 等依赖加载成功后才加载依赖方，卸载按实际成功加载的顺序反向进行。`ModuleDependency` 旧草稿删除。
-- RegisterEvent 和 TaskEvent 内置在 Runtime 里，提供业务功能的部分（存储、下载、安装等）做成官方模块。
+- OnRegistering 和 TaskEvent 内置在 Runtime 里，提供业务功能的部分（存储、下载、安装等）做成官方模块。
 - 进程唯一入口可以持有受控的创建状态；模块实例、订阅、注册结果和任务状态仍由 RuntimeHost 管理，不散落在全局静态可变表中。
-- Runtime 先建立最小 Event 能力并直接登记内置 RegisterEvent、TaskEvent，再自动组装模块并接好 RegisterEvent 订阅；锁定模块名单后派发 RegisterEvent，等待订阅者提交 Registry，校验合并后锁定 Task／Event 注册结果。两次锁定不能合并。
+- Runtime 先建立最小 Event 能力并直接登记内置 OnRegistering、TaskEvent，再自动组装模块并接好 OnRegistering 订阅；锁定模块名单后派发 OnRegistering，等待订阅者提交 Registry，校验合并后锁定 Task／Event 注册结果。两次锁定不能合并。
 - TaskEvent 是 Runtime 自己注册的一种 Event，沿用模块 Event 的执行机制。每次 Task 执行有独立信道，内部短程工作保留本次归属；信道隔离不替代共享资源同步。
-- RegisterEvent、TaskEvent 和模块 Event 使用同一执行机制；内置事件由引导代码直接登记，避免 RegisterEvent 自注册循环。Registry 是定义与绑定的提交清单，具体接口待定；合并必须检查冲突及覆盖内置事件，失败不进入运行。业务初始化只在实际注册的对应事件执行时发生，构造和定义登记不自动初始化。
+- OnRegistering、TaskEvent 和模块 Event 使用同一执行机制；内置事件由引导代码直接登记，避免 OnRegistering 自注册循环。Registry 的接口见 [Event 框架规格](event-framework.md)；合并必须检查冲突及覆盖内置事件，失败不进入运行。业务初始化只在实际注册的对应事件执行时发生，构造和定义登记不自动初始化。
 - Runtime 负责受托管执行和资源生命周期，调用方控制应用启停与进程退出。默认接入不能擅自接管控制台退出信号。
 - Runtime 不拥有借用资源的释放权。需要等待的任务结束之前，不能释放其正在使用的资源。
 - Haytham.Runtime 本身只提供 C# 接口，不含给其他语言调用的代码。给其他语言调用的 C 函数（C ABI）和 Dart、npm 绑定包由本仓库负责，放在独立项目里（暂名 Haytham.Runtime.Native）；三个宿主项目引用它和模块包，发布成 hc、gebinde、full 三种原生库。Launcher 自己的 op、job、事件 port 等产品协议仍由 Launcher 实现。
