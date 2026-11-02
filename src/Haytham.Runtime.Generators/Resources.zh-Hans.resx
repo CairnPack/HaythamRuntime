@@ -16,4 +16,12 @@
   <data name="HRT0006Message" xml:space="preserve"><value>“{0}”标注了 [RuntimeModule]，但本项目还声明了 {1}；一个模块包只能包含一个模块主类</value></data>
   <data name="HRT0007Title" xml:space="preserve"><value>运行时模块声明了多个实例构造函数</value></data>
   <data name="HRT0007Message" xml:space="preserve"><value>“{0}”标注了 [RuntimeModule]，但声明了多个实例构造函数；模块主类只能有一个实例构造函数</value></data>
+  <data name="HRT0008Title" xml:space="preserve"><value>运行时 Task 必须是 partial 类</value></data>
+  <data name="HRT0008Message" xml:space="preserve"><value>“{0}”是具体运行时 Task，但没有声明为 partial</value></data>
+  <data name="HRT0009Title" xml:space="preserve"><value>运行时 Task 必须是 sealed 类</value></data>
+  <data name="HRT0009Message" xml:space="preserve"><value>“{0}”是具体运行时 Task，但没有声明为 sealed</value></data>
+  <data name="HRT0010Title" xml:space="preserve"><value>运行时 Task 不能声明泛型参数</value></data>
+  <data name="HRT0010Message" xml:space="preserve"><value>“{0}”是具体运行时 Task，但声明了泛型参数</value></data>
+  <data name="HRT0011Title" xml:space="preserve"><value>运行时 Task 的外层类型必须是 partial 类型</value></data>
+  <data name="HRT0011Message" xml:space="preserve"><value>“{0}”包含具体运行时 Task，但没有声明为 partial</value></data>
 </root>

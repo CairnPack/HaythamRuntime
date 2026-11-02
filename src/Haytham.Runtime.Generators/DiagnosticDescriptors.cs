@@ -4,7 +4,7 @@ using Microsoft.CodeAnalysis;
 namespace Haytham.Runtime.Generators;
 
 /// <summary>
-/// 标注了 <c>[RuntimeModule]</c> 的类不合格时，生成器报告的编译错误。
+/// 模块主类或具体 Task 类不合格时，生成器报告的编译错误。
 /// </summary>
 /// <remarks>
 /// 每条规则都是错误而不是警告。
@@ -78,6 +78,38 @@ internal static class DiagnosticDescriptors {
         title: Localize("HRT0007Title"),
         messageFormat: Localize("HRT0007Message"),
         category: Category,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor TaskNotPartial = new(
+        id: "HRT0008",
+        title: Localize("HRT0008Title"),
+        messageFormat: Localize("HRT0008Message"),
+        category: "Haytham.Runtime.Tasks",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor TaskNotSealed = new(
+        id: "HRT0009",
+        title: Localize("HRT0009Title"),
+        messageFormat: Localize("HRT0009Message"),
+        category: "Haytham.Runtime.Tasks",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor GenericTask = new(
+        id: "HRT0010",
+        title: Localize("HRT0010Title"),
+        messageFormat: Localize("HRT0010Message"),
+        category: "Haytham.Runtime.Tasks",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor TaskContainingTypeNotPartial = new(
+        id: "HRT0011",
+        title: Localize("HRT0011Title"),
+        messageFormat: Localize("HRT0011Message"),
+        category: "Haytham.Runtime.Tasks",
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 }

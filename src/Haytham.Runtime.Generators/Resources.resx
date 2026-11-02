@@ -16,4 +16,12 @@
   <data name="HRT0006Message" xml:space="preserve"><value>'{0}' is marked with [RuntimeModule], but this project also declares {1}; a module package may contain only one module class</value></data>
   <data name="HRT0007Title" xml:space="preserve"><value>Runtime module declares more than one instance constructor</value></data>
   <data name="HRT0007Message" xml:space="preserve"><value>'{0}' is marked with [RuntimeModule] but declares more than one instance constructor; a module class must have exactly one instance constructor</value></data>
+  <data name="HRT0008Title" xml:space="preserve"><value>Runtime task must be partial</value></data>
+  <data name="HRT0008Message" xml:space="preserve"><value>'{0}' is a concrete runtime task but is not declared partial</value></data>
+  <data name="HRT0009Title" xml:space="preserve"><value>Runtime task must be sealed</value></data>
+  <data name="HRT0009Message" xml:space="preserve"><value>'{0}' is a concrete runtime task but is not declared sealed</value></data>
+  <data name="HRT0010Title" xml:space="preserve"><value>Runtime task must not declare type parameters</value></data>
+  <data name="HRT0010Message" xml:space="preserve"><value>'{0}' is a concrete runtime task but declares type parameters</value></data>
+  <data name="HRT0011Title" xml:space="preserve"><value>Containing type of a runtime task must be partial</value></data>
+  <data name="HRT0011Message" xml:space="preserve"><value>'{0}' contains a concrete runtime task but is not declared partial</value></data>
 </root>

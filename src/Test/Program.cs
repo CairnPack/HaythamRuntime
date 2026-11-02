@@ -11,15 +11,15 @@ Console.WriteLine($"state: {host.State}");
 await host.StartAsync();
 Console.WriteLine($"state: {host.State}");
 
-var first = host.Submit<InstallTask, InstallRequest, InstallResult>(new InstallRequest("demo-pack"),
+var first = InstallTask.Submit(host, new InstallRequest("demo-pack"),
     queueKey: "install", output: new ConsoleTaskOutput<InstallResult>("first"));
-var second = host.Submit<InstallTask, InstallRequest, InstallResult>(new InstallRequest("demo-pack-2"),
+var second = InstallTask.Submit(host, new InstallRequest("demo-pack-2"),
     queueKey: "install", output: new ConsoleTaskOutput<InstallResult>("second"));
 foreach (var completion in await Task.WhenAll(first.Completion, second.Completion)) {
     Console.WriteLine($"install result: {GetResult(completion)}");
 }
 
-var save = host.Submit<SaveValueTask, SaveValue, bool>(new SaveValue("pack", "demo-pack"));
+var save = SaveValueTask.Submit(host, new SaveValue("pack", "demo-pack"));
 Console.WriteLine($"save result: replaced = {GetResult(await save.Completion)}");
 
 await host.PreStopAsync();
@@ -29,7 +29,7 @@ Console.WriteLine($"cancel pre-stop state: {host.State}");
 
 var firstStop = await host.StopAsync();
 Console.WriteLine($"stop: {firstStop.Kind}, state: {host.State}");
-save = host.Submit<SaveValueTask, SaveValue, bool>(new SaveValue("pack", "demo-pack-2"));
+save = SaveValueTask.Submit(host, new SaveValue("pack", "demo-pack-2"));
 Console.WriteLine($"save result after veto: replaced = {GetResult(await save.Completion)}");
 
 var secondStop = await host.StopAsync();

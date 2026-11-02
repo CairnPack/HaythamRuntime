@@ -44,7 +44,7 @@ public sealed class TestModule(TextWriter log) : IRuntimeModule {
 public sealed partial class InstallTask(TextWriter log) : RuntimeTask<InstallRequest, InstallResult> {
     public override TaskExitPolicy ExitPolicy => TaskExitPolicy.Wait;
 
-    protected override ValueTask<InstallResult> ExecuteAsync(TaskEvent<InstallRequest, InstallResult> e) {
+    protected override async ValueTask<InstallResult> ExecuteAsync(TaskEvent<InstallRequest, InstallResult> e) {
         e.Output.ReportLog(new TaskLogEntry($"install {e.Input.PackName} started"));
         for (var i = 1; i <= 2; i++) {
             var step = i;
@@ -55,6 +55,7 @@ public sealed partial class InstallTask(TextWriter log) : RuntimeTask<InstallReq
             });
         }
 
-        return ValueTask.FromResult(new InstallResult(e.Input.PackName, Steps: 2));
+        await SaveValueTask.InvokeAsync(e.Work, new SaveValue("pack", e.Input.PackName));
+        return new InstallResult(e.Input.PackName, Steps: 2);
     }
 }
