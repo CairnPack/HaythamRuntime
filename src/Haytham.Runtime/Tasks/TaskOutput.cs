@@ -30,18 +30,12 @@ public sealed class TaskOutput {
 
     public void ReportProgress(TaskProgress progress) {
         ArgumentNullException.ThrowIfNull(progress);
-        lock (gate) {
-            RequireOpen();
-            reportProgress(progress);
-        }
+        Report(reportProgress, progress);
     }
 
     public void ReportLog(TaskLogEntry entry) {
         ArgumentNullException.ThrowIfNull(entry);
-        lock (gate) {
-            RequireOpen();
-            reportLog(entry);
-        }
+        Report(reportLog, entry);
     }
 
     internal void Close() {
@@ -50,9 +44,19 @@ public sealed class TaskOutput {
         }
     }
 
-    private void RequireOpen() {
-        if (!open) {
-            throw new RuntimeContractException("Task 的报告入口已经关闭。");
+    private void Report<T>(Action<T> report, T value) {
+        lock (gate) {
+            if (!open) {
+                return;
+            }
+
+            try {
+                report(value);
+            }
+            catch (Exception error) {
+                throw new RuntimeExecutionException("Task 报告失败。",
+                    [new RuntimeFailure(RuntimeFailureKind.Output, "Task 报告失败。", error)]);
+            }
         }
     }
 }

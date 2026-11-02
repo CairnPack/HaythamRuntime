@@ -45,11 +45,13 @@ public sealed partial class InstallTask(TextWriter log) : RuntimeTask<InstallReq
     public override TaskExitPolicy ExitPolicy => TaskExitPolicy.Wait;
 
     protected override ValueTask<InstallResult> ExecuteAsync(TaskEvent<InstallRequest, InstallResult> e) {
+        e.Output.ReportLog(new TaskLogEntry($"install {e.Input.PackName} started"));
         for (var i = 1; i <= 2; i++) {
             var step = i;
             e.Work.Run($"install step {step}", async context => {
                 await Task.Delay(50 * step, context.Cancellation);
                 await log.WriteLineAsync($"[Test] install {e.Input.PackName}: step {step} done");
+                context.Output!.ReportProgress(new TaskProgress("install", step, 2));
             });
         }
 

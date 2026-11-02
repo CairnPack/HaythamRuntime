@@ -11,8 +11,13 @@ Console.WriteLine($"state: {host.State}");
 await host.StartAsync();
 Console.WriteLine($"state: {host.State}");
 
-var install = host.Submit<InstallTask, InstallRequest, InstallResult>(new InstallRequest("demo-pack"));
-Console.WriteLine($"install result: {GetResult(await install.Completion)}");
+var first = host.Submit<InstallTask, InstallRequest, InstallResult>(new InstallRequest("demo-pack"),
+    queueKey: "install", output: new ConsoleTaskOutput<InstallResult>("first"));
+var second = host.Submit<InstallTask, InstallRequest, InstallResult>(new InstallRequest("demo-pack-2"),
+    queueKey: "install", output: new ConsoleTaskOutput<InstallResult>("second"));
+foreach (var completion in await Task.WhenAll(first.Completion, second.Completion)) {
+    Console.WriteLine($"install result: {GetResult(completion)}");
+}
 
 var save = host.Submit<SaveValueTask, SaveValue, bool>(new SaveValue("pack", "demo-pack"));
 Console.WriteLine($"save result: replaced = {GetResult(await save.Completion)}");
@@ -44,4 +49,16 @@ static TResult GetResult<TResult>(TaskCompletion<TResult> completion) {
         TaskOutcome<TResult>.Canceled => throw new OperationCanceledException(),
         _ => throw new Exception("未知 Task 结果。")
     };
+}
+
+sealed class ConsoleTaskOutput<TResult>(string name) : ITaskOutputSink<TResult> {
+    public void ReportState(TaskExecutionState state) => Console.WriteLine($"[{name}] state: {state}");
+    public void ReportProgress(TaskProgress progress) =>
+        Console.WriteLine($"[{name}] progress: {progress.Phase} {progress.Done}/{progress.Total}");
+    public void ReportLog(TaskLogEntry entry) => Console.WriteLine($"[{name}] {entry.Message}");
+
+    public async ValueTask CompleteAsync(TaskOutcome<TResult> outcome) {
+        await Task.Delay(25);
+        Console.WriteLine($"[{name}] final output: {outcome}");
+    }
 }
