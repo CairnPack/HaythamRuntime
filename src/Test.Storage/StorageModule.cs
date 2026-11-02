@@ -12,7 +12,7 @@ public sealed class StorageChangedEvent(string key) : RuntimeEvent {
 }
 
 [RuntimeModule]
-internal sealed class StorageModule(TextWriter log) : IRuntimeModule {
+internal sealed class StorageModule(TextWriter log, ScenarioSettings settings) : IRuntimeModule {
     private Dictionary<string, string>? store;
 
     public void Connect(ModuleWiring wiring) => wiring.SubscribeRegister(OnRegistering);
@@ -23,6 +23,14 @@ internal sealed class StorageModule(TextWriter log) : IRuntimeModule {
         e.Registry.Subscribe<RuntimeEvents.OnStarting>(OnStarting);
         e.Registry.Subscribe<RuntimeEvents.OnUnloading>(OnUnloading);
         e.Registry.RegisterTask(new SaveValueTask(this));
+        if (settings.ParallelFailFast) {
+            e.Registry.RegisterEvent(new EventDefinition<ParallelProbeEvent>("并行首错检查", EventDispatchMode.ParallelFailFast));
+            e.Registry.Subscribe<ParallelProbeEvent>(async (probe, _) => {
+                await probe.Probe.SlowStarted.Task;
+                throw probe.Probe.ExpectedFailure;
+            });
+            e.Registry.RegisterTask(new ParallelPublishTask());
+        }
         log.WriteLine($"[{e.TargetModule}] registered");
         return ValueTask.CompletedTask;
     }

@@ -9,7 +9,7 @@ public sealed record InstallRequest(string PackName);
 public sealed record InstallResult(string PackName, int Steps);
 
 [RuntimeModule]
-public sealed class TestModule(TextWriter log) : IRuntimeModule {
+public sealed class TestModule(TextWriter log, ScenarioSettings settings) : IRuntimeModule {
     private bool vetoed;
 
     public void Connect(ModuleWiring wiring) => wiring.SubscribeRegister(OnRegistering);
@@ -22,11 +22,20 @@ public sealed class TestModule(TextWriter log) : IRuntimeModule {
         e.Registry.Subscribe<RuntimeEvents.OnUnloading>((unloading, _) => Log($"[{unloading.TargetModule}] unload"));
         e.Registry.Subscribe<StorageChangedEvent>((changed, _) => Log($"[{e.TargetModule}] saw storage change: {changed.Key}"));
         e.Registry.RegisterTask(new InstallTask(log));
+        e.Registry.RegisterTask(new ScenarioWaitTask());
+        e.Registry.RegisterTask(new ScenarioCancelTask());
+        if (settings.ParallelFailFast) {
+            e.Registry.Subscribe<ParallelProbeEvent>(async (probe, _) => {
+                probe.Probe.SlowStarted.SetResult();
+                await probe.Probe.ReleaseSlow.Task;
+                probe.Probe.SlowFinished.SetResult();
+            });
+        }
         return Log($"[{e.TargetModule}] registered");
     }
 
     private ValueTask OnStopRequested(RuntimeEvents.OnStopRequested e, EventContext context) {
-        if (vetoed) {
+        if (!settings.VetoFirstStop || vetoed) {
             return ValueTask.CompletedTask;
         }
 
