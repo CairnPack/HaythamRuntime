@@ -21,6 +21,7 @@ internal sealed class StorageModule(TextWriter log, ScenarioSettings settings) :
         e.Registry.RegisterEvent(new EventDefinition<StorageChangedEvent>("Storage changed", EventDispatchMode.ParallelJoin));
         e.Registry.Subscribe<RuntimeEvents.OnLoading>(OnLoading);
         e.Registry.Subscribe<RuntimeEvents.OnStarting>(OnStarting);
+        e.Registry.Subscribe<RuntimeEvents.OnStopping>(OnStopping);
         e.Registry.Subscribe<RuntimeEvents.OnUnloading>(OnUnloading);
         e.Registry.RegisterTask(new SaveValueTask(this));
         if (settings.ParallelFailFast) {
@@ -36,19 +37,31 @@ internal sealed class StorageModule(TextWriter log, ScenarioSettings settings) :
     }
 
     private ValueTask OnLoading(RuntimeEvents.OnLoading e, EventContext context) {
+        settings.Lifecycle?.Loaded.Add(e.TargetModule);
         store = new Dictionary<string, string>();
         log.WriteLine($"[{e.TargetModule}] load: storage opened");
         return ValueTask.CompletedTask;
     }
 
     private ValueTask OnUnloading(RuntimeEvents.OnUnloading e, EventContext context) {
+        settings.Lifecycle?.Unloaded.Add(e.TargetModule);
         store = null;
         log.WriteLine($"[{e.TargetModule}] unload: storage released");
         return ValueTask.CompletedTask;
     }
 
     private ValueTask OnStarting(RuntimeEvents.OnStarting e, EventContext context) {
+        settings.Lifecycle?.Started.Add(e.TargetModule);
         e.ContinuousWork.Start("heartbeat", RunHeartbeatAsync);
+        if (settings.ContinuousRetry is { } probe) {
+            probe.InitialHandle = e.ContinuousWork.Start("retry-probe", probe.ExecuteAsync);
+        }
+        return ValueTask.CompletedTask;
+    }
+
+    private ValueTask OnStopping(RuntimeEvents.OnStopping e, EventContext context) {
+        settings.Lifecycle?.Stopping.Add(e.TargetModule);
+        log.WriteLine($"[{e.TargetModule}] stopping");
         return ValueTask.CompletedTask;
     }
 

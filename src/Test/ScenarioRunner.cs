@@ -6,8 +6,9 @@ using Test.Storage;
 
 namespace Test;
 
-internal static class ScenarioRunner {
-    private static readonly string[] Names = ["default", "parallel-fail-fast", "queue", "cancel-and-fail", "output-failure", "pre-stop"];
+internal static partial class ScenarioRunner {
+    private static readonly string[] Names = ["default", "parallel-fail-fast", "queue", "cancel-and-fail", "output-failure", "pre-stop",
+        "stop-decision", "start-rollback", "continuous-retry", "merge-errors", "repeat-calls", "kill", "kill-strategy"];
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
 
     internal static async Task<int> RunAsync(string[] args) {
@@ -99,9 +100,21 @@ internal static class ScenarioRunner {
             "cancel-and-fail" => "第 2 节第 10 条：有效取消为 Canceled，真实失败优先，收到取消后正常完成仍成功。",
             "output-failure" => "第 5 节第 20、23 条：输出失败保留业务成功并释放同键执行权。",
             "pre-stop" => "第 6 节第 12 到 14 条：预退出取消 CancelOnExit，Wait 继续，撤销后恢复准入。",
+            "stop-decision" => "第 6 节第 18、19 条：否决与判定异常均恢复运行，之后可正常停止。",
+            "start-rollback" => "第 6 节第 11 条：启动失败保留错误，停止已启动模块并反序卸载，回滚后不得重新启动。",
+            "continuous-retry" => "第 7 节第 4、6 到 8、11 到 14 条：持续工作故障可观察、不影响模块 Task，重试运行与旧 handle 隔离并受宿主收尾管理。",
+            "merge-errors" => "第 4 节第 9、10 条：合并一次列出所有登记问题，合并失败不执行 OnLoading。",
+            "repeat-calls" => "第 6 节第 4、26 条：并发启动同步拒绝，重复停止、无预退出撤销和第二次创建均拒绝。",
+            "kill" => "第 6 节第 28 条、第 8 节第 8 条：Created 拒绝 Kill，缺少终止策略时报告终止未完成。",
+            "kill-strategy" => "第 6 节第 28 条、第 8 节第 8 条：Created 拒绝 Kill，运行时调用能力表中的终止策略。",
             _ => throw new InvalidOperationException("场景分派错误。")
         };
         Console.WriteLine($"检查规格：{specification}");
+        if (name is "stop-decision" or "start-rollback" or "continuous-retry" or "merge-errors" or "repeat-calls" or "kill" or "kill-strategy") {
+            await RunLifecycleScenarioAsync(name);
+            return;
+        }
+
         var settings = new ScenarioSettings { VetoFirstStop = false, ParallelFailFast = name == "parallel-fail-fast" };
         var host = RuntimeApplication.Create(new RuntimeCapabilities().Add<TextWriter>(TextWriter.Null).Add(settings));
         await host.StartAsync();
