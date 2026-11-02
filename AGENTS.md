@@ -15,10 +15,12 @@
 ```shell
 dotnet build HaythamRuntime.slnx --nologo
 dotnet test HaythamRuntime.slnx --nologo
-dotnet run --project src/Test/Test.csproj
+dotnet run --project src/Test/Test.csproj -- all
+dotnet publish src/Test/Test.csproj -c Release -r win-x64 -warnaserror -p:TrimmerSingleWarn=false
+src/Test/bin/Release/net10.0/win-x64/publish/Test.exe all
 ```
 
-当前没有正式测试用例，因此 `dotnet test` 不能证明生命周期契约已验证。提交前至少确认构建无警告，并说明实际运行过的验证命令。
+当前没有正式测试用例，因此 `dotnet test` 不能证明生命周期契约已验证。`Test` 加参数 `all` 会运行全部手动验证场景；后两条命令是 NativeAOT 检查，环境要求见 [`docs/development.md`](docs/development.md) 的“怎样做 NativeAOT 检查”。提交前至少确认构建无警告，并说明实际运行过的验证命令；改动 Runtime 的公开类型、泛型用法或生成器输出时，同时做一次 NativeAOT 检查。
 
 ## 编码与文档
 
