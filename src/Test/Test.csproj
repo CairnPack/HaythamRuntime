@@ -9,6 +9,9 @@
         <HaythamRuntimeApplication>true</HaythamRuntimeApplication>
         <!-- 把生成的源码写到 obj/.../generated 目录，方便直接在磁盘上查看。 -->
         <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+        <!-- 发布时走 NativeAOT，构建时也打开 AOT 和裁剪分析。写在这里而不是命令行的 -p:PublishAot=true，
+             因为命令行属性会传给 netstandard2.0 的生成器项目，导致 NETSDK1207。 -->
+        <PublishAot>true</PublishAot>
     </PropertyGroup>
 
     <ItemGroup>
