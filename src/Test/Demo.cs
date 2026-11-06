@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Haytham.Runtime;
 using Haytham.Runtime.Generated;
 using Haytham.Runtime.Tasks;
@@ -7,7 +9,7 @@ namespace Test;
 
 internal static class Demo {
     internal static async Task<StopOutcome> RunAsync() {
-        var capabilities = new RuntimeCapabilities().Add<TextWriter>(Console.Out).Add(new ScenarioSettings());
+        var capabilities = new RuntimeCapabilities().Add<ILoggerFactory>(NullLoggerFactory.Instance).Add<TextWriter>(Console.Out).Add(new ScenarioSettings());
         var host = RuntimeApplication.Create(capabilities);
         Console.WriteLine($"state: {host.State}");
 

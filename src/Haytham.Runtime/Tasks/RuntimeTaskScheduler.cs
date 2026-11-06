@@ -1,5 +1,7 @@
 using System.Threading.RateLimiting;
 using Haytham.Runtime.Work;
+using Haytham.Runtime.Logging;
+using Microsoft.Extensions.Logging;
 
 namespace Haytham.Runtime.Tasks;
 
@@ -18,7 +20,7 @@ internal sealed class RuntimeTaskScheduler(RuntimeHost host) {
         WorkNode node;
         TaskRun<TResult> run;
         RuntimeFailure? outputFailure = null;
-        var reports = new TaskOutput(progress => output?.ReportProgress(progress), entry => output?.ReportLog(entry));
+        var reports = new TaskOutput(host.Logger, progress => output?.ReportProgress(progress), entry => output?.ReportLog(entry));
         RateLimitLease? lease = null;
         ValueTask<RateLimitLease> acquisition = default;
         var acquisitionPending = false;
@@ -28,7 +30,7 @@ internal sealed class RuntimeTaskScheduler(RuntimeHost host) {
             host.RequireRootAdmission();
             var registration = host.Events.GetTask<TTask, TInput, TResult>();
             task = (RuntimeTask<TInput, TResult>)registration.Task;
-            node = new WorkNode(host, registration.Module, cancellation, reports);
+            node = new WorkNode(host, registration.Module, cancellation, reports) { TaskType = typeof(TTask).FullName };
             run = new TaskRun<TResult>(node.Id, node.RequestCancellation);
             host.RegisterRoot(node.Id, new RootExecution(run.Completion, () => outputFailure,
                 registration.ExitPolicy == TaskExitPolicy.CancelOnExit ? node.RequestCancellation : null));
@@ -46,10 +48,14 @@ internal sealed class RuntimeTaskScheduler(RuntimeHost host) {
         }
 
         // 不在提交线程执行用户代码，包括第一个 await 之前的部分。
-        _ = Task.Run(RunAsync);
+        using (ExecutionContext.SuppressFlow()) {
+            _ = Task.Run(RunAsync);
+        }
         return run;
 
         async Task RunAsync() {
+            using var scope = node.BeginLogScope();
+            RuntimeLog.TaskAccepted(host.Logger, queued);
             TaskOutcome<TResult> outcome;
             try {
                 var result = await node.ExecuteAsync(async current => {
@@ -99,6 +105,9 @@ internal sealed class RuntimeTaskScheduler(RuntimeHost host) {
             run.SetState(TaskExecutionState.Completing);
             outputFailure = await CompleteOutputAsync(output, outcome, finalState);
             run.SetState(finalState);
+            var failureCount = outcome is TaskOutcome<TResult>.Failed failed ? failed.Failures.Count : 0;
+            RuntimeLog.TaskFinished(host.Logger, failureCount > 0 || outputFailure is not null ? LogLevel.Error : LogLevel.Information,
+                finalState.ToString(), failureCount, outputFailure is not null);
 
             lock (host.Gate) {
                 run.Complete(new TaskCompletion<TResult>(outcome, outputFailure));
@@ -113,13 +122,15 @@ internal sealed class RuntimeTaskScheduler(RuntimeHost host) {
                 output?.ReportState(state);
             }
             catch (Exception error) {
+                RuntimeLog.TaskOutputReportFailed(host.Logger, error.GetType().FullName);
+                RuntimeLog.FailureDetails(host.Logger, 1101, error);
                 throw new RuntimeExecutionException("Task 状态报告失败。",
                     [new RuntimeFailure(RuntimeFailureKind.Output, "Task 状态报告失败。", error)]);
             }
         }
     }
 
-    private static async ValueTask<RuntimeFailure?> CompleteOutputAsync<TResult>(ITaskOutputSink<TResult>? output,
+    private async ValueTask<RuntimeFailure?> CompleteOutputAsync<TResult>(ITaskOutputSink<TResult>? output,
         TaskOutcome<TResult> outcome, TaskExecutionState finalState) {
         if (output is null) {
             return null;
@@ -132,6 +143,8 @@ internal sealed class RuntimeTaskScheduler(RuntimeHost host) {
             return null;
         }
         catch (Exception error) {
+            RuntimeLog.TaskOutputCompletionFailed(host.Logger, error.GetType().FullName);
+            RuntimeLog.FailureDetails(host.Logger, 1102, error);
             return new RuntimeFailure(RuntimeFailureKind.Output, "Task 输出收尾失败。", error);
         }
     }

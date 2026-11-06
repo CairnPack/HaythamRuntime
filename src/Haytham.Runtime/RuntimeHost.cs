@@ -2,6 +2,8 @@ using Haytham.Runtime.Events;
 using Haytham.Runtime.Modules;
 using Haytham.Runtime.Tasks;
 using Haytham.Runtime.Work;
+using Haytham.Runtime.Logging;
+using Microsoft.Extensions.Logging;
 
 namespace Haytham.Runtime;
 
@@ -15,6 +17,7 @@ public sealed partial class RuntimeHost {
     private int state = (int)RuntimeState.Created;
 
     private RuntimeHost(IReadOnlyList<ModuleDefinition> definitions, RuntimeCapabilities capabilities) {
+        Logger = capabilities.Require<ILoggerFactory>().CreateLogger("Haytham.Runtime");
         lifecycle = new RuntimeLifecycle(this, definitions, capabilities);
         tasks = new RuntimeTaskScheduler(this);
         ContinuousWork = new ContinuousWorkManager(this);
@@ -24,6 +27,8 @@ public sealed partial class RuntimeHost {
     public event Action<ContinuousWorkFailure>? ContinuousWorkFailed;
 
     internal object Gate { get; } = new();
+    internal Guid RuntimeId { get; } = Guid.NewGuid();
+    internal ILogger Logger { get; }
     internal EventDispatcher Events { get; private set; } = null!;
     internal ContinuousWorkManager ContinuousWork { get; }
     internal AsyncLocal<WorkNode?> CurrentWork { get; } = new();
@@ -45,12 +50,16 @@ public sealed partial class RuntimeHost {
             var ordered = ModuleOrder.Sort(snapshot);
             var missing = ordered.SelectMany(definition => definition.RequiredCapabilities
                 .Where(type => !capabilitySnapshot.Contains(type))
-                .Select(type => $"模块 {definition.Id} 需要 {type.FullName}。")).ToArray();
+                .Select(type => $"模块 {definition.Id} 需要 {type.FullName}。"))
+                .Concat(capabilitySnapshot.Contains(typeof(ILoggerFactory)) ? [] : new[] { $"Runtime 需要 {typeof(ILoggerFactory).FullName}。" }).ToArray();
             if (missing.Length > 0) {
                 throw new RuntimeConfigurationException("能力表缺少构造参数，没有创建任何模块。", missing);
             }
 
             var host = new RuntimeHost(ordered, capabilitySnapshot);
+            using (host.Logger.BeginScope(new Dictionary<string, object?> { ["RuntimeId"] = host.RuntimeId })) {
+                RuntimeLog.RuntimeCreated(host.Logger, ordered.Count);
+            }
             Volatile.Write(ref creationState, 2);
             return host;
         }
@@ -83,7 +92,18 @@ public sealed partial class RuntimeHost {
 
     internal void InitializeEvents(IReadOnlyList<ModuleDefinition> definitions) => Events = new EventDispatcher(this, definitions);
     internal ValueTask DisposeTaskSchedulerAsync() => tasks.DisposeAsync();
-    internal void SetState(RuntimeState value) => Volatile.Write(ref state, (int)value);
+    internal void SetState(RuntimeState value) {
+        var previous = (RuntimeState)Interlocked.Exchange(ref state, (int)value);
+        if (previous != value) {
+            using var scope = Logger.BeginScope(new Dictionary<string, object?> { ["RuntimeId"] = RuntimeId });
+            RuntimeLog.RuntimeStateChanged(Logger, previous.ToString(), value.ToString());
+        }
+    }
+
+    internal void ObserveFailure(Exception error, RuntimeFailureKind kind) {
+        RuntimeLog.FailureObserved(Logger, kind.ToString(), error.GetType().FullName);
+        RuntimeLog.FailureDetails(Logger, 1100, error);
+    }
 
     internal void SetAdmission(bool open) {
         lock (Gate) {
@@ -131,11 +151,13 @@ public sealed partial class RuntimeHost {
         lock (Gate) {
             RequireRootAdmission();
             Events.CheckPublish(module, e);
-            node = new WorkNode(this, module, cancellation, null);
+            node = new WorkNode(this, module, cancellation, null) { EventType = e.GetType().FullName };
             RegisterRoot(node.Id, new RootExecution(completion.Task, static () => null));
         }
 
-        _ = RunAsync();
+        using (ExecutionContext.SuppressFlow()) {
+            _ = Task.Run(RunAsync);
+        }
         return EventDispatcher.WaitForPublishAsync(completion.Task, firstFailure.Task);
 
         async Task RunAsync() {

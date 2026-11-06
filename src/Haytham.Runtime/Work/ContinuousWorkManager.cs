@@ -1,4 +1,6 @@
 using Haytham.Runtime.Modules;
+using Haytham.Runtime.Logging;
+using Microsoft.Extensions.Logging;
 
 namespace Haytham.Runtime.Work;
 
@@ -16,7 +18,9 @@ internal sealed class ContinuousWorkManager(RuntimeHost host) {
 
             var run = new Run(module, name, operation);
             runs.Add((module, name), run);
-            run.Execution = Task.Run(() => ExecuteAsync(run));
+            using (ExecutionContext.SuppressFlow()) {
+                run.Execution = Task.Run(() => ExecuteAsync(run, false));
+            }
             return run.Handle;
         }
     }
@@ -50,6 +54,8 @@ internal sealed class ContinuousWorkManager(RuntimeHost host) {
                 run.Handle.RequestStop();
             }
             catch (Exception error) {
+                using var scope = BeginRunScope(run);
+                if (error is not RuntimeExecutionException) host.ObserveFailure(error, RuntimeFailureKind.Cleanup);
                 failures.Add(new RuntimeFailure(RuntimeFailureKind.Cleanup, "请求持续工作停止失败。", error, run.Handle.Module));
             }
         }
@@ -85,22 +91,35 @@ internal sealed class ContinuousWorkManager(RuntimeHost host) {
 
         var run = new Run(module, name, previous.Operation);
         runs[(module, name)] = run;
-        run.Execution = Task.Run(() => ExecuteAsync(run));
+        using (ExecutionContext.SuppressFlow()) {
+            run.Execution = Task.Run(() => ExecuteAsync(run, true));
+        }
         return run.Handle;
     }
 
     internal void NotifyFailure(ContinuousWorkFailure failure) => host.NotifyContinuousWorkFailure(failure);
 
-    private async Task ExecuteAsync(Run run) {
+    private IDisposable? BeginRunScope(Run run) => host.Logger.BeginScope(new Dictionary<string, object?> {
+        ["RuntimeId"] = host.RuntimeId, ["ModuleId"] = run.Handle.Module.Value,
+        ["Phase"] = "ContinuousWork", ["WorkName"] = run.Handle.Name
+    });
+
+    private async Task ExecuteAsync(Run run, bool isRetry) {
+        using var scope = BeginRunScope(run);
         var failures = new List<RuntimeFailure>();
         try {
             var context = new ContinuousWorkContext(run.Stopping.Token, new ModuleWorkPort(host, run.Handle.Module),
-                run.ReportReady);
+                () => {
+                    using var readyScope = BeginRunScope(run);
+                    run.ReportReady(host.Logger);
+                });
+            RuntimeLog.ContinuousWorkStarted(host.Logger, isRetry);
             await run.Operation(context);
         }
         catch (OperationCanceledException error) when (run.Stopping.IsCancellationRequested && error.CancellationToken == run.Stopping.Token) {
         }
         catch (Exception error) {
+            if (error is not RuntimeExecutionException) host.ObserveFailure(error, RuntimeFailureKind.Execution);
             failures.Add(new RuntimeFailure(RuntimeFailureKind.Execution, error.Message, error, run.Handle.Module));
         }
 
@@ -121,11 +140,20 @@ internal sealed class ContinuousWorkManager(RuntimeHost host) {
         }
 
         lock (host.Gate) {
+            RuntimeLog.ContinuousWorkFinished(host.Logger, outcome.Kind == ContinuousWorkOutcomeKind.Failed ? LogLevel.Error : LogLevel.Information,
+                outcome.Kind.ToString(), failures.Count);
             run.Completion.SetResult(outcome);
         }
 
         foreach (var failure in failures) {
-            NotifyFailure(new ContinuousWorkFailure(run.Handle.Module, run.Handle.Name, failure));
+            try {
+                NotifyFailure(new ContinuousWorkFailure(run.Handle.Module, run.Handle.Name, failure));
+            }
+            catch (Exception error) {
+                RuntimeLog.ContinuousWorkNotificationFailed(host.Logger, error.GetType().FullName);
+                RuntimeLog.FailureDetails(host.Logger, 1103, error);
+                throw;
+            }
         }
     }
 
@@ -144,9 +172,9 @@ internal sealed class ContinuousWorkManager(RuntimeHost host) {
         internal Task Execution { get; set; } = null!;
         internal bool Finished { get; set; }
 
-        internal void ReportReady() {
+        internal void ReportReady(ILogger logger) {
             lock (Gate) {
-                Ready.TrySetResult();
+                if (Ready.TrySetResult()) RuntimeLog.ContinuousWorkReady(logger);
             }
         }
 

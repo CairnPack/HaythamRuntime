@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using System.Diagnostics;
 using Haytham.Runtime;
 using Haytham.Runtime.Generated;
@@ -126,7 +128,7 @@ internal static partial class ScenarioRunner {
             ParallelFailFast = name == "parallel-fail-fast",
             Lifecycle = name == "output-failure" ? new LifecycleProbe() : null
         };
-        var host = RuntimeApplication.Create(new RuntimeCapabilities().Add<TextWriter>(TextWriter.Null).Add(settings));
+        var host = RuntimeApplication.Create(new RuntimeCapabilities().Add<ILoggerFactory>(NullLoggerFactory.Instance).Add<TextWriter>(TextWriter.Null).Add(settings));
         await host.StartAsync();
         switch (name) {
             case "parallel-fail-fast":

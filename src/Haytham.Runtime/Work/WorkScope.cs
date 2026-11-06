@@ -30,7 +30,7 @@ public sealed class WorkScope {
         var completion = node.RunChild(e.GetType().Name, node.Module, async child => {
             await node.Host.Events.DispatchAsync(e, child, onFailure: error => firstFailure.TrySetResult(error));
             return true;
-        });
+        }, eventType: e.GetType().FullName);
         return EventDispatcher.WaitForPublishAsync(completion, firstFailure.Task);
     }
 
@@ -39,7 +39,8 @@ public sealed class WorkScope {
         var registration = node.Host.Events.GetTask<TTask, TInput, TResult>();
         return new ValueTask<TResult>(node.RunChild(registration.Task.Name, registration.Module,
             child => node.Host.Events.ExecuteTaskAsync((RuntimeTask<TInput, TResult>)registration.Task, input, child),
-            node.Output ?? new TaskOutput(static _ => { }, static _ => { })));
+            node.Output ?? new TaskOutput(node.Host.Logger, static _ => { }, static _ => { }),
+            taskType: registration.Task.GetType().FullName));
     }
 }
 

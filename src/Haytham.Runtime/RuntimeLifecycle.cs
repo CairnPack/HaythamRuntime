@@ -1,6 +1,8 @@
 using Haytham.Runtime.Events;
 using Haytham.Runtime.Modules;
 using Haytham.Runtime.Work;
+using Haytham.Runtime.Logging;
+using Microsoft.Extensions.Logging;
 
 namespace Haytham.Runtime;
 
@@ -23,17 +25,32 @@ internal sealed class RuntimeLifecycle(RuntimeHost host, IReadOnlyList<ModuleDef
                 host.Events.RegisterBuiltIns();
 
                 foreach (var definition in definitions) {
-                    modules.Add((new ModuleId(definition.Id), definition.Create(capabilities)));
+                    var moduleId = new ModuleId(definition.Id);
+                    using var scope = BeginModuleScope(moduleId, "ModuleConstruction");
+                    RuntimeLog.ModuleStepStarted(host.Logger);
+                    try {
+                        modules.Add((moduleId, definition.Create(capabilities)));
+                        RuntimeLog.ModuleStepCompleted(host.Logger);
+                    }
+                    catch (Exception error) {
+                        throw new RuntimeExecutionException("模块构造失败。", GetFailures(error));
+                    }
                 }
 
                 foreach (var module in modules) {
+                    using var scope = BeginModuleScope(module.Id, "ModuleConnect");
+                    RuntimeLog.ModuleStepStarted(host.Logger);
                     var wiring = new ModuleWiring(host, module.Id, host.Events);
                     try {
                         module.Instance.Connect(wiring);
                     }
+                    catch (Exception error) {
+                        throw new RuntimeExecutionException("模块接线失败。", GetFailures(error));
+                    }
                     finally {
                         wiring.Close();
                     }
+                    RuntimeLog.ModuleStepCompleted(host.Logger);
                 }
 
                 host.Events.LockModules();
@@ -51,7 +68,16 @@ internal sealed class RuntimeLifecycle(RuntimeHost host, IReadOnlyList<ModuleDef
                     registries.Add(registry);
                 }
 
-                host.Events.MergeAndLock(registries);
+                using (host.Logger.BeginScope(new Dictionary<string, object?> {
+                    ["RuntimeId"] = host.RuntimeId, ["Phase"] = "RegistryMerge"
+                })) {
+                    try {
+                        host.Events.MergeAndLock(registries);
+                    }
+                    catch (Exception error) {
+                        throw new RuntimeExecutionException("Registry 合并失败。", GetFailures(error));
+                    }
+                }
 
                 foreach (var module in modules) {
                     await DispatchAsync(new RuntimeEvents.OnLoading(module.Id));
@@ -162,12 +188,12 @@ internal sealed class RuntimeLifecycle(RuntimeHost host, IReadOnlyList<ModuleDef
 
             if (failures.Count > 0) {
                 RestoreState(previousState);
-                return new StopOutcome(StopOutcomeKind.DecisionFailed, failures);
+                return FinishStop(StopOutcomeKind.DecisionFailed, failures);
             }
 
             if (vetoed) {
                 RestoreState(previousState);
-                return new StopOutcome(StopOutcomeKind.Vetoed, []);
+                return FinishStop(StopOutcomeKind.Vetoed, []);
             }
 
             RootExecution[] roots;
@@ -186,7 +212,7 @@ internal sealed class RuntimeLifecycle(RuntimeHost host, IReadOnlyList<ModuleDef
             host.SetState(RuntimeState.Unloading);
             var unloaded = await UnloadModulesAsync(failures);
             host.SetState(unloaded ? RuntimeState.Stopped : RuntimeState.Hanging);
-            return new StopOutcome(unloaded ? StopOutcomeKind.Stopped : StopOutcomeKind.CleanupFailed, failures);
+            return FinishStop(unloaded ? StopOutcomeKind.Stopped : StopOutcomeKind.CleanupFailed, failures);
         }
         finally {
             End();
@@ -199,23 +225,48 @@ internal sealed class RuntimeLifecycle(RuntimeHost host, IReadOnlyList<ModuleDef
             throw new RuntimeContractException($"当前状态为 {host.State}，不能调用 {nameof(Kill)}。");
         }
 
+        using var scope = host.Logger.BeginScope(new Dictionary<string, object?> { ["RuntimeId"] = host.RuntimeId });
+        RuntimeLog.KillRequested(host.Logger, host.State.ToString());
+        var hasStrategy = capabilities.Contains(typeof(IRuntimeTerminationStrategy));
         try {
             capabilities.Require<IRuntimeTerminationStrategy>().Terminate();
         }
         catch (Exception error) {
-            throw new RuntimeExecutionException("Runtime 终止未完成。", GetFailures(error));
+            RuntimeLog.KillNotCompleted(host.Logger, hasStrategy ? "Threw" : "MissingStrategy", error.GetType().FullName);
+            if (hasStrategy) RuntimeLog.FailureDetails(host.Logger, 1007, error);
+            throw new RuntimeExecutionException("Runtime 终止未完成。", error is RuntimeExecutionException execution
+                ? execution.Failures : [new RuntimeFailure(error is RuntimeContractException or RuntimeConfigurationException
+                    ? RuntimeFailureKind.Contract : RuntimeFailureKind.Execution, error.Message, error)]);
         }
 
+        RuntimeLog.KillNotCompleted(host.Logger, "Returned", null);
         throw new RuntimeExecutionException("Runtime 终止未完成。",
             [new RuntimeFailure(RuntimeFailureKind.Execution, "终止策略意外返回。")]);
     }
 
     private async Task DispatchAsync(LifecycleEvent e, Action? onHandlerReturned = null) {
-        var node = new WorkNode(host, e.TargetModule, CancellationToken.None, null);
+        using var scope = BeginModuleScope(e.TargetModule, e.GetType().Name);
+        RuntimeLog.ModuleStepStarted(host.Logger);
+        var node = new WorkNode(host, e.TargetModule, CancellationToken.None, null) {
+            Phase = e.GetType().Name, EventType = e.GetType().FullName
+        };
         await node.ExecuteAsync(async current => {
             await host.Events.DispatchAsync(e, current, onHandlerReturned);
             return true;
         });
+        RuntimeLog.ModuleStepCompleted(host.Logger);
+    }
+
+    private IDisposable? BeginModuleScope(ModuleId module, string phase) =>
+        host.Logger.BeginScope(new Dictionary<string, object?> {
+            ["RuntimeId"] = host.RuntimeId, ["ModuleId"] = module.Value, ["Phase"] = phase
+        });
+
+    private StopOutcome FinishStop(StopOutcomeKind kind, IReadOnlyList<RuntimeFailure> failures) {
+        using var scope = host.Logger.BeginScope(new Dictionary<string, object?> { ["RuntimeId"] = host.RuntimeId });
+        RuntimeLog.StopFinished(host.Logger, failures.Count == 0 ? LogLevel.Information : LogLevel.Error,
+            kind.ToString(), host.State.ToString(), failures.Count);
+        return new StopOutcome(kind, failures);
     }
 
     private static async Task DrainAsync(RootExecution[] roots, List<RuntimeFailure> failures) {
@@ -238,6 +289,8 @@ internal sealed class RuntimeLifecycle(RuntimeHost host, IReadOnlyList<ModuleDef
             await host.DisposeTaskSchedulerAsync();
         }
         catch (Exception error) {
+            using var scope = host.Logger.BeginScope(new Dictionary<string, object?> { ["RuntimeId"] = host.RuntimeId });
+            if (error is not RuntimeExecutionException) host.ObserveFailure(error, RuntimeFailureKind.Cleanup);
             failures.Add(new RuntimeFailure(RuntimeFailureKind.Cleanup, "Task 调度器释放失败。", error));
         }
     }
@@ -307,10 +360,15 @@ internal sealed class RuntimeLifecycle(RuntimeHost host, IReadOnlyList<ModuleDef
 
     private void End() => Volatile.Write(ref busy, 0);
 
-    private static List<RuntimeFailure> GetFailures(Exception error, RuntimeFailureKind kind = RuntimeFailureKind.Execution) =>
-        error is RuntimeExecutionException execution
-            ? execution.Failures.Select(failure => kind != RuntimeFailureKind.Execution && failure.Kind == RuntimeFailureKind.Execution
-                ? failure with { Kind = kind } : failure).ToList()
-            : [new RuntimeFailure(error is RuntimeContractException or RuntimeConfigurationException
-                ? RuntimeFailureKind.Contract : kind, error.Message, error)];
+    private List<RuntimeFailure> GetFailures(Exception error, RuntimeFailureKind kind = RuntimeFailureKind.Execution) {
+        if (error is RuntimeExecutionException execution) {
+            return execution.Failures.Select(failure => kind != RuntimeFailureKind.Execution && failure.Kind == RuntimeFailureKind.Execution
+                ? failure with { Kind = kind } : failure).ToList();
+        }
+
+        kind = error is RuntimeContractException or RuntimeConfigurationException ? RuntimeFailureKind.Contract : kind;
+        using var scope = host.Logger.BeginScope(new Dictionary<string, object?> { ["RuntimeId"] = host.RuntimeId });
+        host.ObserveFailure(error, kind);
+        return [new RuntimeFailure(kind, error.Message, error)];
+    }
 }

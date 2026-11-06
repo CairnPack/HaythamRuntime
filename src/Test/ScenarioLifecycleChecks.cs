@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Haytham.Runtime;
 using Haytham.Runtime.Generated;
 using Haytham.Runtime.Work;
@@ -18,7 +20,7 @@ internal static partial class ScenarioRunner {
             CleanupFailure = name == "cleanup-failure" ? new CleanupFailureProbe() : null,
             ContinuousStopSignals = name == "continuous-stop-signals" ? new ContinuousStopSignalsProbe() : null
         };
-        var capabilities = new RuntimeCapabilities().Add<TextWriter>(TextWriter.Null).Add(settings);
+        var capabilities = new RuntimeCapabilities().Add<ILoggerFactory>(NullLoggerFactory.Instance).Add<TextWriter>(TextWriter.Null).Add(settings);
         var strategy = name == "kill-strategy" ? new ScenarioTerminationStrategy() : null;
         if (strategy is not null) {
             capabilities.Add<IRuntimeTerminationStrategy>(strategy);

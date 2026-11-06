@@ -2,6 +2,7 @@ using System.Collections.Frozen;
 using Haytham.Runtime.Modules;
 using Haytham.Runtime.Tasks;
 using Haytham.Runtime.Work;
+using Haytham.Runtime.Logging;
 
 namespace Haytham.Runtime.Events;
 
@@ -115,8 +116,10 @@ internal sealed class EventDispatcher(RuntimeHost host, IReadOnlyList<ModuleDefi
         return registration;
     }
 
-    internal ValueTask<TResult> ExecuteTaskAsync<TInput, TResult>(RuntimeTask<TInput, TResult> task, TInput input, WorkNode node) =>
-        task.ExecuteCoreAsync(new TaskEvent<TInput, TResult>(input, node));
+    internal ValueTask<TResult> ExecuteTaskAsync<TInput, TResult>(RuntimeTask<TInput, TResult> task, TInput input, WorkNode node) {
+        RuntimeLog.TaskStarted(host.Logger);
+        return task.ExecuteCoreAsync(new TaskEvent<TInput, TResult>(input, node));
+    }
 
     internal ValueTask DispatchAsync(RuntimeEvent e, WorkNode node, Action? onHandlerReturned = null,
         Action<RuntimeExecutionException>? onFailure = null) {
@@ -164,7 +167,7 @@ internal sealed class EventDispatcher(RuntimeHost host, IReadOnlyList<ModuleDefi
                     }
 
                     return true;
-                });
+                }, eventType: e.GetType().FullName);
             }
             catch (RuntimeExecutionException error) {
                 failures.AddRange(error.Failures);
@@ -195,7 +198,7 @@ internal sealed class EventDispatcher(RuntimeHost host, IReadOnlyList<ModuleDefi
             async child => {
                 await participant.Invoke(e, new EventContext(child));
                 return true;
-            })).ToArray();
+            }, eventType: e.GetType().FullName)).ToArray();
 
         // 全部登记后才调度，处理器的同步部分也可以并行执行。
         foreach (var child in children) {

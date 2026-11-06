@@ -1,3 +1,6 @@
+using Haytham.Runtime.Logging;
+using Microsoft.Extensions.Logging;
+
 namespace Haytham.Runtime.Tasks;
 
 public sealed record TaskProgress(
@@ -18,12 +21,14 @@ public interface ITaskOutputSink<TResult> {
 }
 
 public sealed class TaskOutput {
+    private readonly ILogger logger;
     private readonly Action<TaskProgress> reportProgress;
     private readonly Action<TaskLogEntry> reportLog;
     private readonly object gate = new();
     private bool open = true;
 
-    internal TaskOutput(Action<TaskProgress> reportProgress, Action<TaskLogEntry> reportLog) {
+    internal TaskOutput(ILogger logger, Action<TaskProgress> reportProgress, Action<TaskLogEntry> reportLog) {
+        this.logger = logger;
         this.reportProgress = reportProgress;
         this.reportLog = reportLog;
     }
@@ -54,6 +59,8 @@ public sealed class TaskOutput {
                 report(value);
             }
             catch (Exception error) {
+                RuntimeLog.TaskOutputReportFailed(logger, error.GetType().FullName);
+                RuntimeLog.FailureDetails(logger, 1101, error);
                 throw new RuntimeExecutionException("Task 报告失败。",
                     [new RuntimeFailure(RuntimeFailureKind.Output, "Task 报告失败。", error)]);
             }
