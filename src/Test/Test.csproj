@@ -15,6 +15,10 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <InternalsVisibleTo Include="Test.Tests" />
+    </ItemGroup>
+
+    <ItemGroup>
         <ProjectReference Include="..\Haytham.Runtime\Haytham.Runtime.csproj" />
         <ProjectReference Include="..\Test.Storage\Test.Storage.csproj" />
         <ProjectReference

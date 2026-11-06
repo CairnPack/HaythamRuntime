@@ -12,3 +12,4 @@
 | [用特性标记订阅者](attribute-based-subscription.md) | 模块变多、手写 `Subscribe` 调用变得繁琐时 |
 | [OnStopRequested 的否决语义](stop-request-veto.md) | 开始细化停止流程时 |
 | [HL 原生库接入 Runtime](hl-native-runtime-migration.md) | Runtime 第一版实现完成、准备接入 HL 时 |
+| [Haytham.Runtime.Native 方案](runtime-native.md) | 出现 HL 以外、要直接使用 hc、gebinde、full 原生库的 Dart 或 JS 程序时 |

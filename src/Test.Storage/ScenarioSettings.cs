@@ -1,4 +1,5 @@
 using Haytham.Runtime;
+using Haytham.Runtime.Tasks;
 using Haytham.Runtime.Work;
 
 namespace Test.Storage;
@@ -12,6 +13,30 @@ public sealed class ScenarioSettings {
     public LifecycleProbe? Lifecycle { get; init; }
     public StartingProbe? Starting { get; init; }
     public ContinuousRetryProbe? ContinuousRetry { get; init; }
+    public CleanupFailureProbe? CleanupFailure { get; init; }
+    public ContinuousStopSignalsProbe? ContinuousStopSignals { get; init; }
+    public TaskExitPolicy SnapshotExitPolicy { get; set; } = TaskExitPolicy.Wait;
+}
+
+public sealed class CleanupFailureProbe {
+    public bool ReleaseExecuted { get; internal set; }
+    public Exception ExpectedFailure { get; } = new InvalidOperationException("Test 模块卸载故意失败，仍持有 Storage 资源。");
+}
+
+public sealed class ContinuousStopSignalsProbe {
+    public List<ContinuousWorkHandle> Handles { get; } = [];
+    public TaskCompletionSource[] StopSignals { get; } = [
+        new(TaskCreationOptions.RunContinuationsAsynchronously),
+        new(TaskCreationOptions.RunContinuationsAsynchronously)
+    ];
+
+    internal async ValueTask ExecuteAsync(int index, ContinuousWorkContext context) {
+        using var registration = context.Stopping.Register(() => StopSignals[index].TrySetResult());
+        context.ReportReady();
+        await StopSignals[index].Task;
+        // 两项工作相互依赖，只有全部收到停止信号后才允许结束。
+        await StopSignals[1 - index].Task;
+    }
 }
 
 public sealed class StopDecisionProbe {

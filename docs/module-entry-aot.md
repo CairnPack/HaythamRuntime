@@ -8,7 +8,7 @@ Runtime 有两类使用者，用法不一样。
 
 **C# 程序**：引用 Haytham.Runtime 和需要的模块包（NuGet），在自己的程序里创建 RuntimeHost。引用了哪些模块包，就用哪些模块，不需要逐个 new 模块或调用 AddModule。
 
-**其他语言的程序**：例如 Flutter 的 Dart 代码、Electron 后端的 TS/JS 代码。它们安装我们发布的 Dart 包或 npm 包，包里带着预先编译好的原生库，直接在 Dart 或 TS 里启动 Runtime、提交任务、接收事件，不需要写 C#。
+**其他语言的程序**（2026-11-06 起暂缓，见本节最后一段）：例如 Flutter 的 Dart 代码、Electron 后端的 TS/JS 代码。它们安装我们发布的 Dart 包或 npm 包，包里带着预先编译好的原生库，直接在 Dart 或 TS 里启动 Runtime、提交任务、接收事件，不需要写 C#。
 
 原生库按产品分三种，每种按平台（例如 win-x64、linux-x64、osx-arm64）各编译一份：
 
@@ -25,6 +25,8 @@ Runtime 有两类使用者，用法不一样。
 - 每个模块单独编译成原生插件：每个插件都带一份 .NET 运行时，模块之间只能通过 C 函数和序列化数据交流。
 - 放弃 NativeAOT，改为运行时加载普通 DLL：启动变慢，安装包要带几十 MB 的 .NET 运行时，还要靠反射找模块。
 - 让开发者在自己机器上合并编译：开发者要装 .NET SDK 和 C++ 构建工具。
+
+目前只有 Haytham Launcher 使用 Runtime。Launcher 属于上面的 C# 程序：它的后端项目引用 Runtime 和模块包，在同一次 NativeAOT 发布里编进自己的原生库，再由自己的 C 函数和 Dart 绑定给 Flutter 使用。所以三种原生库、Dart 包、npm 包和 Haytham.Runtime.Native 项目 2026-11-06 起暂缓，等出现 Launcher 以外的其他语言使用者时再做，设计记录见 [Haytham.Runtime.Native 方案](plans/runtime-native.md)。本文其余提到它们的地方都按暂缓理解。
 
 ## 2. 模块作者要写什么
 
@@ -181,7 +183,7 @@ RegisterEvent 和 TaskEvent 内置在 Runtime 里，不做成模块。判断标�
 
 1. 先搭骨架：Runtime 的基础类型（`IRuntimeModule`、`RuntimeModuleAttribute`、`ModuleDefinition`、`RuntimeModuleManifestAttribute`、`RuntimeCapabilities`、`RuntimeHost.Create`），生成器的两种输出（模块包的入口类和清单特性、应用项目的收集代码），以及 RuntimeHost 启动时的各个步骤（检查模块列表、按依赖排序、检查能力是否齐全、创建模块、接上 RegisterEvent 订阅）。暂时用不到的参数和步骤也先留好位置，让整个执行框架一次成形。
 2. 再补错误检查：版本格式、构造函数参数规则、重复 Id、缺少依赖、成环、缺少能力时列出全部缺项、创建失败时的清理。
-3. 给其他语言用的 Haytham.Runtime.Native 和三个宿主项目，等事件和任务的接口完成后再搭，但项目位置和分工按第 1 节先定下来。
+3. 给其他语言用的 Haytham.Runtime.Native 和三个宿主项目已暂缓，原因见第 1 节最后一段。
 
 不先做只覆盖一部分功能的最小版本，因为那样以后要整块一起扩展。
 

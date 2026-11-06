@@ -14,7 +14,9 @@ internal static partial class ScenarioRunner {
             MergeErrors = name == "merge-errors",
             Lifecycle = name is "start-rollback" or "merge-errors" ? new LifecycleProbe() : null,
             Starting = name == "repeat-calls" ? new StartingProbe() : null,
-            ContinuousRetry = name == "continuous-retry" ? new ContinuousRetryProbe() : null
+            ContinuousRetry = name == "continuous-retry" ? new ContinuousRetryProbe() : null,
+            CleanupFailure = name == "cleanup-failure" ? new CleanupFailureProbe() : null,
+            ContinuousStopSignals = name == "continuous-stop-signals" ? new ContinuousStopSignalsProbe() : null
         };
         var capabilities = new RuntimeCapabilities().Add<TextWriter>(TextWriter.Null).Add(settings);
         var strategy = name == "kill-strategy" ? new ScenarioTerminationStrategy() : null;
@@ -39,6 +41,12 @@ internal static partial class ScenarioRunner {
                 return;
             case "continuous-retry":
                 await CheckContinuousRetryAsync(host, settings.ContinuousRetry!);
+                return;
+            case "cleanup-failure":
+                await CheckCleanupFailureAsync(host, settings.CleanupFailure!);
+                return;
+            case "continuous-stop-signals":
+                await CheckContinuousStopSignalsAsync(host, settings.ContinuousStopSignals!);
                 return;
         }
 

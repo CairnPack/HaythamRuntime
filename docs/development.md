@@ -4,15 +4,15 @@
 
 ## 仓库与实现状态
 
-- `HaythamRuntime.slnx` 已包含 Runtime 类库、`Haytham.Runtime.Generators` 模块清单生成器（netstandard2.0）与 Test、Test.Storage 手动验证项目，源码放在 `src/`。事件框架已经按 [Event 框架规格](event-framework.md) 实现；运行 Test 只证明主线能走通，不能证明生命周期契约已经全部验证，因为还没有正式测试。
+- `HaythamRuntime.slnx` 已包含 Runtime 类库、`Haytham.Runtime.Generators` 模块清单生成器（netstandard2.0）、Test 和 Test.Storage 验证项目，以及在子进程里运行这些场景的 xUnit 测试项目 Test.Tests，源码放在 `src/`。事件框架已经按 [Event 框架规格](event-framework.md) 实现。17 个带检查点的验证场景覆盖主线、停止、回滚、重试、Kill、清理失败、Task 报告边界和退出策略快照，`dotnet test`（`src/Test.Tests`）和 `Test all` 都会在独立进程里逐个运行它们；这些场景还没有覆盖规格里的全部规则，所以不能说生命周期契约已经全部验证。
 - 初始化时使用 .NET SDK `10.0.403`，现有两个项目目标框架为 `net10.0`。主要消费者使用 .NET 10 和 NativeAOT；SDK 锁定与发布平台仍需随验证明确。
 - 当前许可证由根目录 `LICENSE` 定义为 MIT。不将消费者仓库的许可证、构建配置或发布规则直接套入本仓库。
 - 文档使用简体中文；代码标识符使用英文；代码注释及 XML API 文档可以使用简体中文或英文。
 
 ## 依赖与嵌入边界
 
-- 一个进程只允许创建一个 RuntimeHost；启动器和 CLI 分属不同进程，各有自己的实例。框架须限制公开构造和并发创建；重复入口、初始化失败及停止后的返回细则待定，但不得创建第二个实例。当前状态外壳尚未实现该约束。
-- Runtime 不引用 Haytham Core 或 Gebinde 的业务实现。C# 程序引用 Runtime 和需要的模块包，构建时由生成器收集模块并排好顺序，不逐个 new 模块或调用 AddModule；其他语言的程序使用我们预先编译的三种原生库（hc、gebinde、full）。详见[模块清单与 NativeAOT](module-entry-aot.md)。
+- 一个进程只允许创建一个 RuntimeHost；启动器和 CLI 分属不同进程，各有自己的实例。框架须限制公开构造和并发创建；重复入口、初始化失败及停止后的返回细则待定，但不得创建第二个实例。这条约束已经实现：`RuntimeHost.Create` 用原子操作占住创建权，重复或并发调用抛出 `RuntimeAlreadyCreatedException`；创建前的检查失败时会放开创建权，可以修正输入后再调用。
+- Runtime 不引用 Haytham Core 或 Gebinde 的业务实现。C# 程序引用 Runtime 和需要的模块包，构建时由生成器收集模块并排好顺序，不逐个 new 模块或调用 AddModule；其他语言的程序原本计划使用我们预先编译的三种原生库（hc、gebinde、full），这部分已暂缓，见本节最后一条。详见[模块清单与 NativeAOT](module-entry-aot.md)。
 - 无参数 `[RuntimeModule]` 标记模块主类，主类实现 IRuntimeModule。模块的 Id、版本、作者和说明来自模块项目 csproj 的 `PackageId`、`Version`、`Authors`、`Description`，不再手写 `ModuleDescriptor`，`IRuntimeModule` 也不再有静态 `Descriptor`。未标记的类不会被当成模块，已标记却不满足条件的类报编译错误。
 - 模块通过构造函数获得外部对象。外部对象统一放在能力表（暂名 `RuntimeCapabilities`）里按类型存取，生成器按构造函数参数生成取值代码；只能有一个构造函数，不猜参数，缺少时在创建任何模块之前一次列出全部缺项，不传 null。构造函数暂不接收其他模块提供的服务。DI 只在组装入口使用，业务代码里不使用服务定位器。
 - Runtime 不再引用 Semver，模块版本就是 NuGet 包版本，以字符串保存，格式由生成器在构建时按 SemVer 2.0 检查。
@@ -24,7 +24,7 @@
 - OnRegistering、TaskEvent 和模块 Event 使用同一执行机制；内置事件由引导代码直接登记，避免 OnRegistering 自注册循环。Registry 的接口见 [Event 框架规格](event-framework.md)；合并必须检查冲突及覆盖内置事件，失败不进入运行。业务初始化只在实际注册的对应事件执行时发生，构造和定义登记不自动初始化。
 - Runtime 负责受托管执行和资源生命周期，调用方控制应用启停与进程退出。默认接入不能擅自接管控制台退出信号。
 - Runtime 不拥有借用资源的释放权。需要等待的任务结束之前，不能释放其正在使用的资源。
-- Haytham.Runtime 本身只提供 C# 接口，不含给其他语言调用的代码。给其他语言调用的 C 函数（C ABI）和 Dart、npm 绑定包由本仓库负责，放在独立项目里（暂名 Haytham.Runtime.Native）；三个宿主项目引用它和模块包，发布成 hc、gebinde、full 三种原生库。Launcher 自己的 op、job、事件 port 等产品协议仍由 Launcher 实现。
+- Haytham.Runtime 本身只提供 C# 接口，不含给其他语言调用的代码。目前只有 Launcher 使用 Runtime：Launcher 的 C# 后端直接引用 Runtime 和模块包，在同一次 NativeAOT 发布里编进自己的原生库，op、job、事件 port 等产品协议和 C 函数都由 Launcher 实现。给其他语言直接调用的通用 C 函数、Dart 和 npm 绑定包，以及 hc、gebinde、full 三种原生库，2026-11-06 起暂缓，等出现 Launcher 以外的使用者时再做，设计见 [Haytham.Runtime.Native 方案](plans/runtime-native.md)。
 
 ## 错误与清理
 
@@ -48,13 +48,38 @@
 ## NativeAOT 与验证
 
 - 面向 NativeAOT 设计注册和调用路径，优先静态、类型化绑定；不得未经验证依赖反射扫描或动态代码生成。
-- 模块范围在构建发布时固定。模块包在构建时导出清单特性和入口类，应用构建时由生成器读取引用程序集上的清单特性并收集；协议已在[模块清单与 NativeAOT](module-entry-aot.md)中确定，尚未实现。NativeAOT 发布后不能加载新的托管 DLL，新增模块需要重新构建发布。
+- 模块范围在构建发布时固定。模块包在构建时导出清单特性和入口类，应用构建时由生成器读取引用程序集上的清单特性并收集；协议见[模块清单与 NativeAOT](module-entry-aot.md)，生成器已经按它实现，还缺的构建期检查见本文最后一段。NativeAOT 发布后不能加载新的托管 DLL，新增模块需要重新构建发布。
 - 消费者将警告作为错误。后续项目须验证裁剪与 AOT 警告，不能通过静默关闭分析器或批量抑制警告掩盖兼容性问题。
 - JIT 单元测试不能替代实际 NativeAOT 发布和原生调用验证；验证结论须注明 SDK、依赖版本、平台及实际覆盖路径。
 - 测试失败先检查实现和契约，不以放宽断言、任意等待、重试或跳过来保留缺陷。
 - 候选组件比较应提供相同的 DI、日志和生命周期语义，再比较维护成本、性能与依赖体积。
 
+### 怎样做 NativeAOT 检查
+
+`src/Test/Test.csproj` 里写了 `PublishAot`，所以直接发布就是 NativeAOT。发布时把警告当作错误，再在发布出来的程序里运行全部场景：
+
+```powershell
+dotnet publish src/Test/Test.csproj -c Release -r win-x64 -warnaserror -p:TrimmerSingleWarn=false
+src/Test/bin/Release/net10.0/win-x64/publish/Test.exe all
+```
+
+`-p:TrimmerSingleWarn=false` 让裁剪和 AOT 警告指到具体的代码位置，而不是每个程序集只汇总成一条。最后一行输出“通过：17，失败：0”且退出码为 0，就说明检查通过。
+
+`PublishAot` 只能写在 Test 项目里，不能用命令行的 `-p:PublishAot=true` 传入。原因是命令行属性会传给所有被引用的项目，生成器项目的目标框架是 netstandard2.0，不支持 AOT，会报 NETSDK1207。
+
+在 Windows 上发布需要安装 Visual Studio 的“使用 C++ 的桌面开发”工作负载，并且 `PATH` 里要有 `C:\Program Files (x86)\Microsoft Visual Studio\Installer`。原因是 Visual Studio 18 的 `vcvarsall.bat` 会直接按名字调用 `vswhere.exe`，找不到时链接一步会失败，错误信息是“'vswhere.exe' 不是内部或外部命令”。在“Developer PowerShell for VS”里运行，或者在当前终端里先把这个目录加进 `PATH`，都可以解决。
+
+### 已经做过的验证
+
+2026-11-03 在以下环境验证：.NET SDK 10.0.403，ILCompiler 10.0.14，Visual Studio 18 Community（MSVC 14.51），Windows 11，目标平台 win-x64。
+
+- 按上面的命令发布 Test，没有裁剪或 AOT 警告；在发布出来的 `Test.exe` 里运行 `all`，13 个场景全部通过。
+- 另外在一个临时项目里，把同样的场景代码发布成共享库（`NativeLib=Shared`），通过 `[UnmanagedCallersOnly]` 导出的函数，从外部进程的线程上同步调用，每个场景用一个独立进程，13 个场景也全部通过。这对应 HL 原生库的使用方式。这个临时项目没有放进仓库；Native 项目暂缓以后，共享库方式的常规检查由 Launcher 在自己的原生库上做。
+- 没有覆盖的部分：只验证了 win-x64，没有验证 Linux、macOS 和 arm64；也没有验证从 Dart 通过 FFI 调用的情况。
+
 ## 下一步工作边界
+
+下面三段是 2026-10-31 定下的实施顺序，到 2026-11-03 已经按这个顺序全部做完，保留在这里作为记录。目前还没做的是补齐验证场景、日志接入和生成器的构建期检查；Haytham.Runtime.Native 项目已暂缓。
 
 按 2026-10-31 最新实施顺序，先建立 RuntimeHost 状态外壳并明确进程唯一性，再接入模块静态描述、资格标记、生成清单、自动组装、基元 Event 和注册流程。这里管理的是运行实例，不要求先创建专用线程，也不以线程结束代替生命周期完成。
 
@@ -66,5 +91,5 @@
 
 完整依赖验证使用两个模块包／可打包项目，每包一个模块，由包依赖表达初始化顺序，覆盖生成清单、跨包发现、进程唯一性、并行子任务、持续工作、Stop 否决后继续运行、反序卸载和失败清理。多宿主场景使用独立测试进程，不在同进程创建两个 RuntimeHost。骨架尽早经过 NativeAOT 验证。
 
-具体命令随项目和测试创建后写入 README；当前没有可运行的 Runtime 生命周期测试，也没有 `npm run verify-notes` 等 Launcher 专用工具。生成器已按 2026-11-01 确定的方案改写：为模块包生成入口类和清单特性，为声明了 `HaythamRuntimeApplication` 的项目生成 `RuntimeApplication.Create`；检查模块主类是否合格（HRT0001 至 HRT0004），一个项目声明多个模块主类时报 HRT0006，主类有多个构造函数时报 HRT0007。版本格式、构造参数规则、重复 Id、缺少依赖和成环的构建期诊断还没有做，见[模块清单与 NativeAOT](module-entry-aot.md)第 7 节；其中重复 Id、缺少依赖和成环目前由 Runtime 在启动时检查。脚本桥接与全面业务迁移不因本轮文档修订而开始。
+构建和验证命令写在 [AGENTS.md](../AGENTS.md) 里；生命周期验证目前是 `dotnet test` 运行的 17 个场景，还没有 `npm run verify-notes` 等 Launcher 专用工具。生成器已按 2026-11-01 确定的方案改写：为模块包生成入口类和清单特性，为声明了 `HaythamRuntimeApplication` 的项目生成 `RuntimeApplication.Create`；检查模块主类是否合格（HRT0001 至 HRT0004），一个项目声明多个模块主类时报 HRT0006，主类有多个构造函数时报 HRT0007。版本格式、构造参数规则、重复 Id、缺少依赖和成环的构建期诊断还没有做，见[模块清单与 NativeAOT](module-entry-aot.md)第 7 节；其中重复 Id、缺少依赖和成环目前由 Runtime 在启动时检查。脚本桥接与全面业务迁移不因本轮文档修订而开始。
 

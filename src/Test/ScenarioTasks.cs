@@ -1,4 +1,5 @@
 using Haytham.Runtime.Tasks;
+using Test.Storage;
 
 namespace Test;
 
@@ -54,4 +55,22 @@ internal sealed partial class ScenarioCancelTask : RuntimeTask<ScenarioTaskInput
     public override TaskExitPolicy ExitPolicy => TaskExitPolicy.CancelOnExit;
 
     protected override ValueTask<int> ExecuteAsync(TaskEvent<ScenarioTaskInput, int> e) => e.Input.ExecuteAsync(e.Cancellation);
+}
+
+internal sealed partial class ScenarioPolicyTask(ScenarioSettings settings) : RuntimeTask<ScenarioTaskInput, int> {
+    public override TaskExitPolicy ExitPolicy => settings.SnapshotExitPolicy;
+
+    protected override ValueTask<int> ExecuteAsync(TaskEvent<ScenarioTaskInput, int> e) => e.Input.ExecuteAsync(e.Cancellation);
+}
+
+internal sealed partial class ScenarioReportTask : RuntimeTask<ReportBoundaryProbe, int> {
+    public override TaskExitPolicy ExitPolicy => TaskExitPolicy.Wait;
+
+    protected override ValueTask<int> ExecuteAsync(TaskEvent<ReportBoundaryProbe, int> e) {
+        e.Input.SavedOutput = e.Output;
+        e.Input.Records.Enqueue("调用前");
+        e.Output.ReportProgress(new TaskProgress("报告边界"));
+        e.Input.Records.Enqueue("调用后");
+        return ValueTask.FromResult(42);
+    }
 }

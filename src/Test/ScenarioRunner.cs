@@ -7,8 +7,9 @@ using Test.Storage;
 namespace Test;
 
 internal static partial class ScenarioRunner {
-    private static readonly string[] Names = ["default", "parallel-fail-fast", "queue", "cancel-and-fail", "output-failure", "pre-stop",
-        "stop-decision", "start-rollback", "continuous-retry", "merge-errors", "repeat-calls", "kill", "kill-strategy"];
+    internal static readonly string[] Names = ["default", "parallel-fail-fast", "queue", "cancel-and-fail", "output-failure", "pre-stop",
+        "stop-decision", "start-rollback", "continuous-retry", "merge-errors", "repeat-calls", "kill", "kill-strategy",
+        "cleanup-failure", "task-report-boundary", "exit-policy-snapshot", "continuous-stop-signals"];
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
 
     internal static async Task<int> RunAsync(string[] args) {
@@ -98,7 +99,11 @@ internal static partial class ScenarioRunner {
             "parallel-fail-fast" => "第 3 节第 5 条：发布提前报告首错，所属执行等待慢订阅者结束。",
             "queue" => "第 5 节第 12 到 14、21 条：同键按接纳顺序执行，完成输出后交接；排队取消不执行业务。",
             "cancel-and-fail" => "第 2 节第 10 条：有效取消为 Canceled，真实失败优先，收到取消后正常完成仍成功。",
-            "output-failure" => "第 5 节第 20、23 条：输出失败保留业务成功并释放同键执行权。",
+            "output-failure" => "§5.20、5.23、§6.18 第 6 到 9 步、§6.21、6.22、6.24：Stop 等待输出收尾，输出失败仍交接同键并汇入 Stopped 的结果。",
+            "cleanup-failure" => "§6.24、6.25、§1.9：依赖方卸载失败且仍持有资源时，不释放被依赖资源，返回 CleanupFailed、Hanging 并保留原错。",
+            "task-report-boundary" => "§5.27、5.28、5.21 第 2 步：进度同步交给接收端，根 Completion 完成后封闭报告入口。",
+            "exit-policy-snapshot" => "§5.4、§6.12：ExitPolicy 在登记时固定，之后修改配置不影响预退出策略。",
+            "continuous-stop-signals" => "§6.23、§7.14：先向全部持续工作发停止信号，再等待它们实际结束。",
             "pre-stop" => "第 6 节第 12 到 14 条：预退出取消 CancelOnExit，Wait 继续，撤销后恢复准入。",
             "stop-decision" => "第 6 节第 18、19 条：否决与判定异常均恢复运行，之后可正常停止。",
             "start-rollback" => "第 6 节第 11 条：启动失败保留错误，停止已启动模块并反序卸载，回滚后不得重新启动。",
@@ -110,12 +115,17 @@ internal static partial class ScenarioRunner {
             _ => throw new InvalidOperationException("场景分派错误。")
         };
         Console.WriteLine($"检查规格：{specification}");
-        if (name is "stop-decision" or "start-rollback" or "continuous-retry" or "merge-errors" or "repeat-calls" or "kill" or "kill-strategy") {
+        if (name is "stop-decision" or "start-rollback" or "continuous-retry" or "merge-errors" or "repeat-calls" or "kill" or "kill-strategy"
+            or "cleanup-failure" or "continuous-stop-signals") {
             await RunLifecycleScenarioAsync(name);
             return;
         }
 
-        var settings = new ScenarioSettings { VetoFirstStop = false, ParallelFailFast = name == "parallel-fail-fast" };
+        var settings = new ScenarioSettings {
+            VetoFirstStop = false,
+            ParallelFailFast = name == "parallel-fail-fast",
+            Lifecycle = name == "output-failure" ? new LifecycleProbe() : null
+        };
         var host = RuntimeApplication.Create(new RuntimeCapabilities().Add<TextWriter>(TextWriter.Null).Add(settings));
         await host.StartAsync();
         switch (name) {
@@ -130,7 +140,13 @@ internal static partial class ScenarioRunner {
                 await CheckCancellationAsync(host);
                 break;
             case "output-failure":
-                await CheckOutputFailureAsync(host);
+                await CheckOutputFailureAsync(host, settings.Lifecycle!);
+                return;
+            case "task-report-boundary":
+                await CheckTaskReportBoundaryAsync(host);
+                break;
+            case "exit-policy-snapshot":
+                await CheckExitPolicySnapshotAsync(host, settings);
                 break;
             case "pre-stop":
                 await CheckPreStopAsync(host);
@@ -237,7 +253,7 @@ internal static partial class ScenarioRunner {
         }
     }
 
-    private static async Task CheckOutputFailureAsync(RuntimeHost host) {
+    private static async Task CheckOutputFailureAsync(RuntimeHost host, LifecycleProbe probe) {
         var firstInput = new ScenarioTaskInput();
         var output = new ScenarioOutput { FailOnComplete = true };
         var first = ScenarioWaitTask.Submit(host, firstInput, "output-failure", output);
@@ -249,6 +265,10 @@ internal static partial class ScenarioRunner {
         firstInput.Release.SetResult();
         await output.Completing.Task;
         Check(!first.Completion.IsCompleted && secondInput.ExecutionCount == 0, "输出收尾尚未结束时 Completion 或后项已推进。");
+        var stopping = host.StopAsync();
+        Check(!stopping.IsCompleted && probe.Unloaded.Count == 0,
+            $"首项 CompleteAsync 仍受阻时 Stop 已完成或 OnUnloading 已执行：Stop 完成={stopping.IsCompleted}，卸载次数={probe.Unloaded.Count}。");
+        Console.WriteLine("检查点 1：首项 CompleteAsync 受阻，Stop 尚未完成，OnUnloading 未执行。");
         output.Release.SetResult();
         var completion = await first.Completion;
         Check(completion.Business is TaskOutcome<int>.Succeeded { Result: 42 } && first.State == TaskExecutionState.Succeeded,
@@ -259,6 +279,12 @@ internal static partial class ScenarioRunner {
         secondInput.Release.SetResult();
         RequireSuccess(await second.Completion);
         Console.WriteLine("检查点：首项业务 Succeeded、OutputFailure 非空，同键下一项成功执行。");
+        var stop = await stopping;
+        Check(stop.Kind == StopOutcomeKind.Stopped && host.State == RuntimeState.Stopped
+            && probe.Unloaded.SequenceEqual(probe.Loaded.AsEnumerable().Reverse())
+            && stop.Failures.Any(item => item.Kind == RuntimeFailureKind.Output && ReferenceEquals(item.Exception, output.ExpectedFailure)),
+            $"资源释放后 Stop 未返回包含原始输出故障的 Stopped：结果={stop.Kind}，状态={host.State}，故障数={stop.Failures.Count}，卸载顺序={string.Join(" → ", probe.Unloaded)}。");
+        Console.WriteLine("检查点 2：两个模块均已反序卸载，Stop 返回 Stopped，Failures 保留原始输出故障。");
     }
 
     private static async Task CheckPreStopAsync(RuntimeHost host) {

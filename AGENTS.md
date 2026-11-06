@@ -4,7 +4,8 @@
 
 - `src/Haytham.Runtime/`：Runtime 源码。
 - `src/Haytham.Runtime.Generators/`：模块清单生成器（netstandard2.0），由 `src/Directory.Build.props` 向它传递 MSBuild 属性。
-- `src/Test/`、`src/Test.Storage/`：手动验证用的应用项目和它依赖的模块包，尚未接入正式测试框架。
+- `src/Test/`、`src/Test.Storage/`：验证场景的应用项目和它依赖的模块包。
+- `src/Test.Tests/`：xUnit 测试项目，每个场景一条用例，在子进程里运行 `Test.dll <场景名>`，因为一个进程只能创建一个 RuntimeHost。新增场景时加进 `ScenarioRunner.Names`，测试会自动包含它。
 - `docs/`：需求与开发约束；行为或契约变化时同步更新。
 - `HaythamRuntime.slnx`：解决方案入口；不要提交 `bin/`、`obj/` 等构建产物。
 
@@ -20,7 +21,7 @@ dotnet publish src/Test/Test.csproj -c Release -r win-x64 -warnaserror -p:Trimme
 src/Test/bin/Release/net10.0/win-x64/publish/Test.exe all
 ```
 
-当前没有正式测试用例，因此 `dotnet test` 不能证明生命周期契约已验证。`Test` 加参数 `all` 会运行全部手动验证场景；后两条命令是 NativeAOT 检查，环境要求见 [`docs/development.md`](docs/development.md) 的“怎样做 NativeAOT 检查”。提交前至少确认构建无警告，并说明实际运行过的验证命令；改动 Runtime 的公开类型、泛型用法或生成器输出时，同时做一次 NativeAOT 检查。
+`dotnet test` 和 `Test` 加参数 `all` 运行的是同一批验证场景；场景还没有覆盖规格里的全部规则，所以全部通过也不等于生命周期契约已经全部验证。后两条命令是 NativeAOT 检查，环境要求见 [`docs/development.md`](docs/development.md) 的“怎样做 NativeAOT 检查”。提交前至少确认构建无警告，并说明实际运行过的验证命令；改动 Runtime 的公开类型、泛型用法或生成器输出时，同时做一次 NativeAOT 检查。
 
 ## 编码与文档
 

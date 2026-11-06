@@ -47,7 +47,7 @@ public sealed class TaskOutput {
     private void Report<T>(Action<T> report, T value) {
         lock (gate) {
             if (!open) {
-                return;
+                throw new RuntimeContractException("Task 已经结束，报告入口已关闭；TaskOutput 只能在本次执行和它登记的必要子工作里使用。");
             }
 
             try {

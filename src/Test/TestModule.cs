@@ -27,12 +27,18 @@ public sealed class TestModule(TextWriter log, ScenarioSettings settings) : IRun
         });
         e.Registry.Subscribe<RuntimeEvents.OnUnloading>((unloading, _) => {
             settings.Lifecycle?.Unloaded.Add(unloading.TargetModule);
+            if (settings.CleanupFailure is { } probe) {
+                // Test 依赖 Storage；卸载失败表示 Test 可能仍在使用 Storage，Runtime 不能再释放 Storage。
+                throw probe.ExpectedFailure;
+            }
             return Log($"[{unloading.TargetModule}] unload");
         });
         e.Registry.Subscribe<StorageChangedEvent>((changed, _) => Log($"[{e.TargetModule}] saw storage change: {changed.Key}"));
         e.Registry.RegisterTask(new InstallTask(log));
         e.Registry.RegisterTask(new ScenarioWaitTask());
         e.Registry.RegisterTask(new ScenarioCancelTask());
+        e.Registry.RegisterTask(new ScenarioReportTask());
+        e.Registry.RegisterTask(new ScenarioPolicyTask(settings));
         if (settings.MergeErrors) {
             e.Registry.Subscribe<UnregisteredScenarioEvent>((_, _) => ValueTask.CompletedTask);
             e.Registry.RegisterTask(new ScenarioWaitTask());

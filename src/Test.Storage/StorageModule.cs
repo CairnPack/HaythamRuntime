@@ -45,6 +45,9 @@ internal sealed class StorageModule(TextWriter log, ScenarioSettings settings) :
 
     private ValueTask OnUnloading(RuntimeEvents.OnUnloading e, EventContext context) {
         settings.Lifecycle?.Unloaded.Add(e.TargetModule);
+        if (settings.CleanupFailure is { } probe) {
+            probe.ReleaseExecuted = true;
+        }
         store = null;
         log.WriteLine($"[{e.TargetModule}] unload: storage released");
         return ValueTask.CompletedTask;
@@ -52,7 +55,15 @@ internal sealed class StorageModule(TextWriter log, ScenarioSettings settings) :
 
     private ValueTask OnStarting(RuntimeEvents.OnStarting e, EventContext context) {
         settings.Lifecycle?.Started.Add(e.TargetModule);
-        e.ContinuousWork.Start("heartbeat", RunHeartbeatAsync);
+        if (settings.ContinuousStopSignals is { } signals) {
+            for (var i = 0; i < 2; i++) {
+                var index = i;
+                signals.Handles.Add(e.ContinuousWork.Start($"stop-signal-{index}", context => signals.ExecuteAsync(index, context)));
+            }
+        }
+        else {
+            e.ContinuousWork.Start("heartbeat", RunHeartbeatAsync);
+        }
         if (settings.ContinuousRetry is { } probe) {
             probe.InitialHandle = e.ContinuousWork.Start("retry-probe", probe.ExecuteAsync);
         }

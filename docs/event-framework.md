@@ -602,7 +602,7 @@ public sealed class WorkScope
 
 ### 报告和接入层边界
 
-26. `TaskOutput` 绑定执行身份；业务不填写 HL job id。必要子工作的报告关联到根 Task，进度汇总算法由业务负责。
+26. `TaskOutput` 绑定执行身份；业务不填写 HL job id。必要子工作的报告关联到根 Task，进度汇总算法由业务负责。`TaskOutput` 只能在本次执行和它登记的必要子工作里使用；第 21 条第 2 步封闭报告入口之后再调用 `ReportProgress` 或 `ReportLog`，抛出 `RuntimeContractException`，接收端收不到这次报告。这种调用只会出现在把 `TaskOutput` 带出了执行范围的代码里（例如没有登记的 `Task.Run`、计时器或事件回调），抛错是为了让这个错误被发现，而不是静默丢掉。
 
 27. 报告同步交给接收端，快速返回，不在 Runtime 内偷偷使用未追踪的线程池回调。接收端负责协调并发报告。
 

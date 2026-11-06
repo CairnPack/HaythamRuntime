@@ -23,7 +23,7 @@ internal sealed class RuntimeTaskScheduler(RuntimeHost host) {
             node = new WorkNode(host, registration.Module, cancellation, reports);
             run = new TaskRun<TResult>(node.Id, node.RequestCancellation);
             host.RegisterRoot(node.Id, new RootExecution(run.Completion, () => outputFailure,
-                task.ExitPolicy == TaskExitPolicy.CancelOnExit ? node.RequestCancellation : null));
+                registration.ExitPolicy == TaskExitPolicy.CancelOnExit ? node.RequestCancellation : null));
 
             if (queueKey is not null) {
                 if (!queues.TryGetValue(queueKey, out var queue)) {
