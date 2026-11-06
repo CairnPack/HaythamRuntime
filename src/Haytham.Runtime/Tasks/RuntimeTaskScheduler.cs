@@ -1,9 +1,17 @@
+using System.Threading.RateLimiting;
 using Haytham.Runtime.Work;
 
 namespace Haytham.Runtime.Tasks;
 
 internal sealed class RuntimeTaskScheduler(RuntimeHost host) {
-    private readonly Dictionary<string, LinkedList<TaskCompletionSource<bool>>> queues = new(StringComparer.Ordinal);
+    private readonly PartitionedRateLimiter<string> limiter = PartitionedRateLimiter.Create<string, string>(
+        key => RateLimitPartition.GetConcurrencyLimiter(key, static _ => new ConcurrencyLimiterOptions {
+            PermitLimit = 1,
+            QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+            QueueLimit = int.MaxValue
+        }), StringComparer.Ordinal);
+
+    internal ValueTask DisposeAsync() => limiter.DisposeAsync();
 
     internal TaskRun<TResult> Submit<TTask, TInput, TResult>(TInput input, string? queueKey,
         ITaskOutputSink<TResult>? output, CancellationToken cancellation) where TTask : RuntimeTask<TInput, TResult> {
@@ -11,9 +19,9 @@ internal sealed class RuntimeTaskScheduler(RuntimeHost host) {
         TaskRun<TResult> run;
         RuntimeFailure? outputFailure = null;
         var reports = new TaskOutput(progress => output?.ReportProgress(progress), entry => output?.ReportLog(entry));
-        var turn = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        LinkedListNode<TaskCompletionSource<bool>>? position = null;
-        CancellationTokenRegistration queuedCancellation = default;
+        RateLimitLease? lease = null;
+        ValueTask<RateLimitLease> acquisition = default;
+        var acquisitionPending = false;
         var queued = false;
         RuntimeTask<TInput, TResult> task;
         lock (host.Gate) {
@@ -26,20 +34,14 @@ internal sealed class RuntimeTaskScheduler(RuntimeHost host) {
                 registration.ExitPolicy == TaskExitPolicy.CancelOnExit ? node.RequestCancellation : null));
 
             if (queueKey is not null) {
-                if (!queues.TryGetValue(queueKey, out var queue)) {
-                    queue = new LinkedList<TaskCompletionSource<bool>>();
-                    queues.Add(queueKey, queue);
+                lease = limiter.AttemptAcquire(queueKey);
+                if (!lease.IsAcquired) {
+                    lease.Dispose();
+                    lease = null;
+                    queued = true;
+                    acquisition = limiter.AcquireAsync(queueKey, 1, node.Cancellation);
+                    acquisitionPending = true;
                 }
-
-                queued = queue.Count > 0;
-                position = queue.AddLast(turn);
-                if (queued) {
-                    queuedCancellation = node.Cancellation.Register(() => CancelQueued(position));
-                }
-            }
-
-            if (!queued) {
-                turn.SetResult(true);
             }
         }
 
@@ -54,10 +56,14 @@ internal sealed class RuntimeTaskScheduler(RuntimeHost host) {
                     ReportState(TaskExecutionState.Submitted);
                     if (queued) {
                         ReportState(TaskExecutionState.Queued);
+                        acquisitionPending = false;
+                        lease = await acquisition;
+                        if (!lease.IsAcquired) {
+                            throw new RuntimeContractException("Task 排队执行权申请失败。");
+                        }
                     }
 
-                    var execute = await turn.Task;
-                    if (!execute) {
+                    if (current.Cancellation.IsCancellationRequested) {
                         throw new OperationCanceledException(current.Cancellation);
                     }
 
@@ -73,7 +79,14 @@ internal sealed class RuntimeTaskScheduler(RuntimeHost host) {
                 outcome = new TaskOutcome<TResult>.Canceled();
             }
             finally {
-                queuedCancellation.Dispose();
+                // 状态报告失败时，仍须接收已经提交的申请，避免遗失并发取得的租约。
+                if (acquisitionPending) {
+                    try {
+                        lease = await acquisition;
+                    }
+                    catch (OperationCanceledException) when (node.Cancellation.IsCancellationRequested) {
+                    }
+                }
             }
 
             reports.Close();
@@ -90,16 +103,7 @@ internal sealed class RuntimeTaskScheduler(RuntimeHost host) {
             lock (host.Gate) {
                 run.Complete(new TaskCompletion<TResult>(outcome, outputFailure));
                 host.RemoveRoot(node.Id);
-                if (position?.List is { } queue) {
-                    var wasFirst = queue.First == position;
-                    queue.Remove(position);
-                    if (wasFirst && queue.First is { } next) {
-                        next.Value.SetResult(true);
-                    }
-                    else if (queue.Count == 0) {
-                        queues.Remove(queueKey!);
-                    }
-                }
+                lease?.Dispose();
             }
         }
 
@@ -111,15 +115,6 @@ internal sealed class RuntimeTaskScheduler(RuntimeHost host) {
             catch (Exception error) {
                 throw new RuntimeExecutionException("Task 状态报告失败。",
                     [new RuntimeFailure(RuntimeFailureKind.Output, "Task 状态报告失败。", error)]);
-            }
-        }
-    }
-
-    private void CancelQueued(LinkedListNode<TaskCompletionSource<bool>> position) {
-        lock (host.Gate) {
-            if (!position.Value.Task.IsCompleted) {
-                position.List!.Remove(position);
-                position.Value.SetResult(false);
             }
         }
     }

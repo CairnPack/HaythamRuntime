@@ -82,6 +82,7 @@ public sealed partial class RuntimeHost {
     }
 
     internal void InitializeEvents(IReadOnlyList<ModuleDefinition> definitions) => Events = new EventDispatcher(this, definitions);
+    internal ValueTask DisposeTaskSchedulerAsync() => tasks.DisposeAsync();
     internal void SetState(RuntimeState value) => Volatile.Write(ref state, (int)value);
 
     internal void SetAdmission(bool open) {

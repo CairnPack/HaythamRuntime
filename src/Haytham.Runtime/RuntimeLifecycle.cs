@@ -81,6 +81,7 @@ internal sealed class RuntimeLifecycle(RuntimeHost host, IReadOnlyList<ModuleDef
             catch (Exception error) {
                 var failures = GetFailures(error);
                 var cleanup = new List<RuntimeFailure>();
+                await DisposeTaskSchedulerAsync(cleanup);
                 await StopContinuousWorkAsync(cleanup);
                 // 已经执行过 OnStarting 的模块先反序收到 OnStopping，再统一卸载。
                 await StopModulesAsync(cleanup);
@@ -176,6 +177,7 @@ internal sealed class RuntimeLifecycle(RuntimeHost host, IReadOnlyList<ModuleDef
             }
 
             await DrainAsync(roots, failures);
+            await DisposeTaskSchedulerAsync(failures);
 
             host.SetState(RuntimeState.Stopping);
             await StopContinuousWorkAsync(failures);
@@ -228,6 +230,15 @@ internal sealed class RuntimeLifecycle(RuntimeHost host, IReadOnlyList<ModuleDef
             if (root.GetOutputFailure() is { } outputFailure) {
                 failures.Add(outputFailure);
             }
+        }
+    }
+
+    private async ValueTask DisposeTaskSchedulerAsync(List<RuntimeFailure> failures) {
+        try {
+            await host.DisposeTaskSchedulerAsync();
+        }
+        catch (Exception error) {
+            failures.Add(new RuntimeFailure(RuntimeFailureKind.Cleanup, "Task 调度器释放失败。", error));
         }
     }
 
