@@ -9,6 +9,7 @@ HRT0001 | Haytham.Runtime.Modules | Error | RuntimeModuleGenerator: marked class
 HRT0002 | Haytham.Runtime.Modules | Error | RuntimeModuleGenerator: marked class is abstract or static
 HRT0003 | Haytham.Runtime.Modules | Error | RuntimeModuleGenerator: marked class is generic
 HRT0004 | Haytham.Runtime.Modules | Error | RuntimeModuleGenerator: marked class is not accessible from generated code
+HRT0005 | Haytham.Runtime.Modules | Error | RuntimeModuleGenerator: package Version is not valid SemVer 2.0
 HRT0006 | Haytham.Runtime.Modules | Error | RuntimeModuleGenerator: project declares more than one module class
 HRT0007 | Haytham.Runtime.Modules | Error | RuntimeModuleGenerator: marked class declares more than one instance constructor
 HRT0008 | Haytham.Runtime.Tasks | Error | RuntimeTaskGenerator: concrete task class is not partial

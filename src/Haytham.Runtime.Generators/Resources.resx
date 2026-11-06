@@ -24,4 +24,6 @@
   <data name="HRT0010Message" xml:space="preserve"><value>'{0}' is a concrete runtime task but declares type parameters</value></data>
   <data name="HRT0011Title" xml:space="preserve"><value>Containing type of a runtime task must be partial</value></data>
   <data name="HRT0011Message" xml:space="preserve"><value>'{0}' contains a concrete runtime task but is not declared partial</value></data>
+  <data name="HRT0005Title" xml:space="preserve"><value>Module package version must be valid SemVer 2.0</value></data>
+  <data name="HRT0005Message" xml:space="preserve"><value>Module package '{0}' has an invalid SemVer 2.0 value '{1}' for the MSBuild property 'Version'. Use MAJOR.MINOR.PATCH, optionally followed by -prerelease and +build metadata.</value></data>
 </root>

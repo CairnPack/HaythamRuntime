@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/Haytham.Runtime/Haytham.Runtime.csproj" />
     <Project Path="src/Haytham.Runtime.Generators/Haytham.Runtime.Generators.csproj" />
+    <Project Path="src/Haytham.Runtime.Generators.Tests/Haytham.Runtime.Generators.Tests.csproj" />
   </Folder>
   <Project Path="src/Test.Storage/Test.Storage.csproj" />
   <Project Path="src/Test.Tests/Test.Tests.csproj" />

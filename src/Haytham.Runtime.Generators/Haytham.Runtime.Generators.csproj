@@ -20,6 +20,11 @@
     </ItemGroup>
 
     <ItemGroup>
+        <!-- 测试项目直接调用版本格式检查函数。 -->
+        <InternalsVisibleTo Include="Haytham.Runtime.Generators.Tests" />
+    </ItemGroup>
+
+    <ItemGroup>
         <!-- 登记本生成器报告的诊断 ID 的发布追踪文件；没有这两个文件时，RS2008 规则会报警告。 -->
         <AdditionalFiles Include="AnalyzerReleases.Shipped.md" />
         <AdditionalFiles Include="AnalyzerReleases.Unshipped.md" />

@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Globalization;
 using System.Text;
+using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -25,6 +26,12 @@ public sealed class RuntimeModuleGenerator : IIncrementalGenerator {
     private const string ManifestMetadataName = "Haytham.Runtime.Modules.RuntimeModuleManifestAttribute";
     private const string ExportsNamespace = "Haytham.Runtime.Generated.Exports";
     private const string DependencyPrefix = "Dependency";
+
+    // semver.org 官方表达式：限定整串与 ASCII 数字，不接受末尾换行。
+    private static readonly Regex SemVerPattern = new(
+        @"\A(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-((?:0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?\z");
+
+    internal static bool IsValidVersion(string version) => SemVerPattern.IsMatch(version);
 
     public void Initialize(IncrementalGeneratorInitializationContext context) {
         // 使用编译器的特性索引，只分析标记过的 class 和 record class。
@@ -54,6 +61,12 @@ public sealed class RuntimeModuleGenerator : IIncrementalGenerator {
 
             var referencedModules = ReadReferencedModules(compilation);
             var module = validModules.Length == 1 ? validModules[0] : null;
+            if (module is not null && !IsValidVersion(buildProperties.Version)) {
+                sourceContext.ReportDiagnostic(Diagnostic.Create(
+                    DiagnosticDescriptors.InvalidVersion, Location.None, buildProperties.Id, buildProperties.Version));
+                return;
+            }
+
             var entryName = ToIdentifier(compilation.AssemblyName!);
             sourceContext.AddSource("RuntimeModuleManifest.g.cs", EmitManifest(module, entryName, buildProperties, referencedModules));
 

@@ -62,6 +62,14 @@ internal static class DiagnosticDescriptors {
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 
+    public static readonly DiagnosticDescriptor InvalidVersion = new(
+        id: "HRT0005",
+        title: Localize("HRT0005Title"),
+        messageFormat: Localize("HRT0005Message"),
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
     // 模块包只允许包含一个 MainClass。
     // 一个项目就是一个包，所以同一次编译里出现多个合格的 MainClass 时，全部报错。
     public static readonly DiagnosticDescriptor MultipleModules = new(
