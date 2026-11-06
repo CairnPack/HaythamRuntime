@@ -171,7 +171,9 @@ if (completion.Business is TaskOutcome<int>.Succeeded success) {
 模块主类的构造函数参数，会由生成器逐个改写成 `capabilities.Require<T>()`。宿主程序负责把对象放进能力表：
 
 ```csharp
-var capabilities = new RuntimeCapabilities().Add<TextWriter>(Console.Out);
+var capabilities = new RuntimeCapabilities()
+    .Add<ILoggerFactory>(loggerFactory)
+    .Add<TextWriter>(Console.Out);
 var host = RuntimeApplication.Create(capabilities);
 ```
 
@@ -181,6 +183,7 @@ var host = RuntimeApplication.Create(capabilities);
 - 每个参数都是引用类型（类或接口），按类型从能力表取，不要写可空参数、带默认值的参数、`params`、`ref`／`out`／`in`，也不要直接用 `string` 或数字。需要配置值时，包成一个选项类再放进能力表。
 - Runtime 在创建任何模块之前，先检查所有模块需要的类型是否都在能力表里。缺了就一次列出全部缺项，抛 `RuntimeConfigurationException`。
 - 能力表里的对象由放进去的一方负责释放，模块只是借用，不要在 `OnUnloading` 里去释放它。
+- 能力表里一定有 `ILoggerFactory`，因为 Runtime 自己也需要它。模块要写日志时，在构造函数里接收 `ILoggerFactory`，用它创建自己类别的 logger；在事件处理器和 Task 里写的日志会自动带上 Runtime 开的 scope（模块、阶段、执行身份）。
 - 构造函数拿不到其他模块提供的服务，因为构造发生在启动的最早阶段，被依赖的模块还没有加载。模块之间的调用走 Task 和事件（第 4、5 节）。
 - 构造函数里只保存引用，不做 I/O，也不启动任何东西。
 
@@ -694,7 +697,7 @@ private async ValueTask RunSyncLoopAsync(ContinuousWorkContext context) {
 
 ### 生成器诊断
 
-这些都是编译错误，不是警告，因为标了特性却进不了清单的类会让模块在启动时悄悄缺席。诊断信息会随编译器语言显示简体中文或英文。编号 HRT0005 没有使用。
+这些都是编译错误，不是警告，因为标了特性却进不了清单的类会让模块在启动时悄悄缺席。诊断信息会随编译器语言显示简体中文或英文。
 
 | 编号 | 含义 | 怎样改 |
 |---|---|---|
@@ -702,6 +705,7 @@ private async ValueTask RunSyncLoopAsync(ContinuousWorkContext context) {
 | HRT0002 | 模块主类是抽象类或静态类，无法创建实例 | 去掉 `abstract` 或 `static` |
 | HRT0003 | 模块主类是泛型类，或嵌套在泛型类里 | 改成非泛型类，嵌套时把外层类也改成非泛型 |
 | HRT0004 | 生成的代码访问不到模块主类、它的外层类型或它的构造函数 | 主类、外层类型和构造函数都写成 `public` 或 `internal`，不要用 `private`、`protected` 或文件内可见（`file`） |
+| HRT0005 | 模块包的 `Version` 不是合法的 SemVer 2.0 版本号，例如四段的 `1.0.0.1` 或空值 | 改成 `主版本.次版本.修订号`，需要时加 `-预发布标识` 和 `+构建元数据` |
 | HRT0006 | 一个项目里有多个模块主类 | 一个模块包只留一个主类，其余拆成独立的模块项目 |
 | HRT0007 | 模块主类声明了多个实例构造函数 | 只保留一个构造函数 |
 | HRT0008 | Task 类没有声明为 `partial` | 加上 `partial` |

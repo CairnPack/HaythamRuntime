@@ -2,7 +2,7 @@
 
 这里放讨论过、用户认为有价值，但第一版先不做的设计。每份文件是一个提案，写明它解决什么问题、目前想到的做法、为什么现在不做，以及什么时候该拿出来。需要时从这里取出，再按当时的需求重新设计和评审。
 
-来源都是 [Event 架构设计评审](../event-architecture-review.md)（下称“评审文件”）。
+除日志脱敏一份外，来源都是 [Event 架构设计评审](../event-architecture-review.md)（下称“评审文件”）。
 
 | 提案 | 什么时候拿出来 |
 |---|---|
@@ -12,4 +12,5 @@
 | [用特性标记订阅者](attribute-based-subscription.md) | 模块变多、手写 `Subscribe` 调用变得繁琐时 |
 | [OnStopRequested 的否决语义](stop-request-veto.md) | 开始细化停止流程时 |
 | [HL 原生库接入 Runtime](hl-native-runtime-migration.md) | Runtime 第一版实现完成、准备接入 HL 时 |
+| [发行版日志里的异常详情和脱敏](log-redaction.md) | HL 准备把 Runtime 的日志接到发行版之前，并且 HL 的 T6 已经定案时 |
 | [Haytham.Runtime.Native 方案](runtime-native.md) | 出现 HL 以外、要直接使用 hc、gebinde、full 原生库的 Dart 或 JS 程序时 |

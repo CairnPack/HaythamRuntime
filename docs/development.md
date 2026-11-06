@@ -4,8 +4,9 @@
 
 ## 仓库与实现状态
 
-- `HaythamRuntime.slnx` 已包含 Runtime 类库、`Haytham.Runtime.Generators` 模块清单生成器（netstandard2.0）、Test 和 Test.Storage 验证项目，以及在子进程里运行这些场景的 xUnit 测试项目 Test.Tests，源码放在 `src/`。事件框架已经按 [Event 框架规格](event-framework.md) 实现。17 个带检查点的验证场景覆盖主线、停止、回滚、重试、Kill、清理失败、Task 报告边界和退出策略快照，`dotnet test`（`src/Test.Tests`）和 `Test all` 都会在独立进程里逐个运行它们；这些场景还没有覆盖规格里的全部规则，所以不能说生命周期契约已经全部验证。
+- `HaythamRuntime.slnx` 已包含 Runtime 类库、`Haytham.Runtime.Generators` 模块清单生成器（netstandard2.0）、Test 和 Test.Storage 验证项目，在子进程里运行这些场景的 xUnit 测试项目 Test.Tests，以及检查生成器诊断和输出的测试项目 Haytham.Runtime.Generators.Tests，源码放在 `src/`。事件框架已经按 [Event 框架规格](event-framework.md) 实现。17 个带检查点的验证场景覆盖主线、停止、回滚、重试、Kill、清理失败、Task 报告边界和退出策略快照，`dotnet test`（`src/Test.Tests`）和 `Test all` 都会在独立进程里逐个运行它们；这些场景还没有覆盖规格里的全部规则，所以不能说生命周期契约已经全部验证。
 - 初始化时使用 .NET SDK `10.0.403`，现有两个项目目标框架为 `net10.0`。主要消费者使用 .NET 10 和 NativeAOT；SDK 锁定与发布平台仍需随验证明确。
+- Runtime 引用两个微软维护的 NuGet 包（MIT）：`Microsoft.Extensions.Logging.Abstractions` 10.0.14 用于日志接口，`System.Threading.RateLimiting` 10.0.14 用于按键排队（每个键一个许可数为 1、先进先出的 `ConcurrencyLimiter`）。生成器测试使用 `Microsoft.CodeAnalysis.CSharp.SourceGenerators.Testing` 1.1.4。
 - 当前许可证由根目录 `LICENSE` 定义为 MIT。不将消费者仓库的许可证、构建配置或发布规则直接套入本仓库。
 - 文档使用简体中文；代码标识符使用英文；代码注释及 XML API 文档可以使用简体中文或英文。
 
@@ -44,6 +45,8 @@
 - 不记录 token、凭据、含敏感数据的完整请求，或游戏命令行。错误和事件载荷同样需要避免泄露机密。
 - 日志不能替代调用结果和错误传播；不为了排错引入无界的任务历史或订阅保留。
 - 日志与 DI 可以独立接入，二者的需要不自动决定采用 Generic Host。
+- 使用方把 `ILoggerFactory` 放进能力表，这是必需的能力，缺少时和其他缺项一起在创建模块之前报错。不需要输出时放 `NullLoggerFactory.Instance`。Runtime 用类别 `Haytham.Runtime` 记录生命周期状态、模块步骤、Task 和持续工作的开始与结束、首次观察到的故障，通过 scope 带上 `RuntimeId`、`ModuleId`、`Phase`、`ExecutionId`、`RootExecutionId`、`TaskType`、`EventType`、`WorkName` 中适用的字段。模块要写日志时，在构造函数里接收同一个 `ILoggerFactory`。
+- Information 及以上级别只记录类型名、状态、计数这类标量，不记录异常消息、Task 输入输出、事件对象和排队键。同一个故障点另有一条 Debug 级别的记录（EventId 1104），把原始异常对象交给 logger，用于开发者在本机排错。这条记录不脱敏，所以使用方的发行版不能开启 Debug 级别。发行版日志因此看不到异常消息和堆栈；要不要由 HL 统一脱敏后再记录，是待决项，见[发行版日志里的异常详情和脱敏](plans/log-redaction.md)。
 
 ## NativeAOT 与验证
 
@@ -91,5 +94,5 @@ src/Test/bin/Release/net10.0/win-x64/publish/Test.exe all
 
 完整依赖验证使用两个模块包／可打包项目，每包一个模块，由包依赖表达初始化顺序，覆盖生成清单、跨包发现、进程唯一性、并行子任务、持续工作、Stop 否决后继续运行、反序卸载和失败清理。多宿主场景使用独立测试进程，不在同进程创建两个 RuntimeHost。骨架尽早经过 NativeAOT 验证。
 
-构建和验证命令写在 [AGENTS.md](../AGENTS.md) 里；生命周期验证目前是 `dotnet test` 运行的 17 个场景，还没有 `npm run verify-notes` 等 Launcher 专用工具。生成器已按 2026-11-01 确定的方案改写：为模块包生成入口类和清单特性，为声明了 `HaythamRuntimeApplication` 的项目生成 `RuntimeApplication.Create`；检查模块主类是否合格（HRT0001 至 HRT0004），一个项目声明多个模块主类时报 HRT0006，主类有多个构造函数时报 HRT0007。版本格式、构造参数规则、重复 Id、缺少依赖和成环的构建期诊断还没有做，见[模块清单与 NativeAOT](module-entry-aot.md)第 7 节；其中重复 Id、缺少依赖和成环目前由 Runtime 在启动时检查。脚本桥接与全面业务迁移不因本轮文档修订而开始。
+构建和验证命令写在 [AGENTS.md](../AGENTS.md) 里；生命周期验证目前是 `dotnet test` 运行的 17 个场景，还没有 `npm run verify-notes` 等 Launcher 专用工具。生成器已按 2026-11-01 确定的方案改写：为模块包生成入口类和清单特性，为声明了 `HaythamRuntimeApplication` 的项目生成 `RuntimeApplication.Create`；检查模块主类是否合格（HRT0001 至 HRT0004），一个项目声明多个模块主类时报 HRT0006，主类有多个构造函数时报 HRT0007。版本格式不是 SemVer 2.0 时报 HRT0005。构造参数规则、重复 Id、缺少依赖和成环的构建期诊断还没有做，见[模块清单与 NativeAOT](module-entry-aot.md)第 7 节；其中重复 Id、缺少依赖和成环目前由 Runtime 在启动时检查。脚本桥接与全面业务迁移不因本轮文档修订而开始。
 

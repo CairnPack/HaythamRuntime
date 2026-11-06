@@ -2,7 +2,7 @@
 
 为 Haytham Core、Gebinde 及其消费者提供可嵌入的独立运行环境，统一组织模块生命周期、事件执行、受托管任务和资源收尾。
 
-目前事件框架已经按 [Event 框架规格](docs/event-framework.md) 实现：模块组装、OnRegistering 注册、加载启动、Task 排队与输出、持续工作、预退出、停止卸载和 Kill 都能从头运行。NativeAOT 发布已经在 win-x64 上验证过，做法和覆盖范围见[开发约束](docs/development.md)。验证场景接入了 `dotnet test`，但还没有覆盖规格里的全部规则；日志接入还没有做。
+目前事件框架已经按 [Event 框架规格](docs/event-framework.md) 实现：模块组装、OnRegistering 注册、加载启动、Task 排队与输出、持续工作、预退出、停止卸载和 Kill 都能从头运行。NativeAOT 发布已经在 win-x64 上验证过，做法和覆盖范围见[开发约束](docs/development.md)。验证场景接入了 `dotnet test`，但还没有覆盖规格里的全部规则。日志已经通过 `Microsoft.Extensions.Logging.Abstractions` 接入，还没有验证场景检查日志内容。
 
 ## 文档
 
@@ -22,6 +22,7 @@ src/Haytham.Runtime.Generators/   模块清单和 Task 代码的生成器
 src/Test/                         验证场景的控制台程序
 src/Test.Storage/                 Test 用到的示例模块包
 src/Test.Tests/                   在子进程里逐个运行验证场景的 xUnit 测试
+src/Haytham.Runtime.Generators.Tests/  生成器的诊断和输出测试
 docs/                             需求与开发文档
 ```
 

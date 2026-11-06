@@ -53,7 +53,7 @@ internal sealed class StorageModule : IRuntimeModule
 对应关系如下：
 
 - 模块 Id 就是 `PackageId`。没有打包的项目 `PackageId` 默认等于程序集名，所以同样有 Id。NuGet 的包 ID 不区分大小写，所以比较模块 Id 时也不区分大小写，显示时用 csproj 里的原样。
-- 模块版本就是 `Version`，也就是 NuGet 包版本。它必须是合法的 SemVer 2.0 版本号，例如四段的 `1.0.0.1` 会在构建时报错。
+- 模块版本就是 `Version`，也就是 NuGet 包版本。它必须是合法的 SemVer 2.0 版本号，例如四段的 `1.0.0.1` 会在构建时报 HRT0005，这时生成器不生成这个模块的入口类和清单。
 - 作者和说明来自 `Authors` 和 `Description`。
 
 因此去掉了以前手写的 `ModuleDescriptor` 和 `ModuleDependency`，`IRuntimeModule` 也不再有静态的 `Descriptor` 属性，暂时是一个没有成员的接口，之后再加订阅事件这类成员。去掉静态抽象成员以后，`Func<IRuntimeModule>`、`List<IRuntimeModule>` 都能正常编译，以前遇到的 CS8920 限制不再存在。
@@ -165,6 +165,7 @@ new InstallModule(capabilities.Require<IDownloader>())
 - 每个参数按类型从能力表取。可空参数（如 `IStorage?`）、带默认值的参数、`params`、`ref`／`out`／`in`、`string` 和数字类型的参数都报编译错误，因为它们都需要猜“缺少时传什么”或“要的是哪一个值”。配置值请包成一个选项类再传。
 - 创建任何模块之前，Runtime 先检查所有模块需要的类型是否都在表里；缺了就一次列出全部缺项并停止，这时还没有创建任何模块。
 - 能力表里的对象由放进去的一方负责释放，Runtime 只是借用。
+- 能力表里必须有 `ILoggerFactory`，Runtime 自己也从这里取日志工厂，没有时和其他缺项一起报错。
 
 还没定的两件事：
 
@@ -182,7 +183,7 @@ RegisterEvent 和 TaskEvent 内置在 Runtime 里，不做成模块。判断标�
 先把整个项目骨架搭好，再逐步补上错误检查：
 
 1. 先搭骨架：Runtime 的基础类型（`IRuntimeModule`、`RuntimeModuleAttribute`、`ModuleDefinition`、`RuntimeModuleManifestAttribute`、`RuntimeCapabilities`、`RuntimeHost.Create`），生成器的两种输出（模块包的入口类和清单特性、应用项目的收集代码），以及 RuntimeHost 启动时的各个步骤（检查模块列表、按依赖排序、检查能力是否齐全、创建模块、接上 RegisterEvent 订阅）。暂时用不到的参数和步骤也先留好位置，让整个执行框架一次成形。
-2. 再补错误检查：版本格式、构造函数参数规则、重复 Id、缺少依赖、成环、缺少能力时列出全部缺项、创建失败时的清理。
+2. 再补错误检查：版本格式、构造函数参数规则、重复 Id、缺少依赖、成环、缺少能力时列出全部缺项、创建失败时的清理。其中版本格式（HRT0005）和缺少能力时列出全部缺项已经做了；重复 Id、缺少依赖和成环目前由 Runtime 在启动时检查。
 3. 给其他语言用的 Haytham.Runtime.Native 和三个宿主项目已暂缓，原因见第 1 节最后一段。
 
 不先做只覆盖一部分功能的最小版本，因为那样以后要整块一起扩展。

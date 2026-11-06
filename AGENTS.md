@@ -4,6 +4,7 @@
 
 - `src/Haytham.Runtime/`：Runtime 源码。
 - `src/Haytham.Runtime.Generators/`：模块清单生成器（netstandard2.0），由 `src/Directory.Build.props` 向它传递 MSBuild 属性。
+- `src/Haytham.Runtime.Generators.Tests/`：生成器测试，检查每个诊断的报错位置、关键输出和版本格式，用 Roslyn 的生成器测试库在内存里编译。
 - `src/Test/`、`src/Test.Storage/`：验证场景的应用项目和它依赖的模块包。
 - `src/Test.Tests/`：xUnit 测试项目，每个场景一条用例，在子进程里运行 `Test.dll <场景名>`，因为一个进程只能创建一个 RuntimeHost。新增场景时加进 `ScenarioRunner.Names`，测试会自动包含它。
 - `docs/`：需求与开发约束；行为或契约变化时同步更新。
