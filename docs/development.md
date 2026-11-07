@@ -80,6 +80,42 @@ src/Test/bin/Release/net10.0/win-x64/publish/Test.exe all
 - 另外在一个临时项目里，把同样的场景代码发布成共享库（`NativeLib=Shared`），通过 `[UnmanagedCallersOnly]` 导出的函数，从外部进程的线程上同步调用，每个场景用一个独立进程，13 个场景也全部通过。这对应 HL 原生库的使用方式。这个临时项目没有放进仓库；Native 项目暂缓以后，共享库方式的常规检查由 Launcher 在自己的原生库上做。
 - 没有覆盖的部分：只验证了 win-x64，没有验证 Linux、macOS 和 arm64；也没有验证从 Dart 通过 FFI 调用的情况。
 
+## 打包与发布
+
+只发布一个 NuGet 包 `Haytham.Runtime`，生成器也在这个包里。包里的内容如下：
+
+```text
+lib/net10.0/Haytham.Runtime.dll             Runtime 程序集和 XML 文档
+analyzers/dotnet/cs/Haytham.Runtime.Generators.dll
+analyzers/dotnet/cs/zh-Hans/...resources.dll 生成器的中文诊断信息
+build/Haytham.Runtime.props                  把 PackageId、Version 等属性交给生成器
+README.md
+```
+
+引用这个包的项目会自动运行生成器，并导入 `build/Haytham.Runtime.props`。这份 props 就是仓库里的 `src/Haytham.Runtime.Generators/build/Haytham.Runtime.Generators.props`，因为 NuGet 只自动导入和包同名的 props，所以打包时改了名。NuGet 默认不把依赖包的 analyzers 和 build 目录传给间接引用方，所以模块包和应用都要直接引用 `Haytham.Runtime`。打包配置写在 [Haytham.Runtime.csproj](../src/Haytham.Runtime/Haytham.Runtime.csproj) 里；Runtime 对生成器项目的 `ProjectReference` 只用来保证打包前先构建生成器，不会出现在包的依赖里。
+
+在本机打包：
+
+```shell
+dotnet pack src/Haytham.Runtime/Haytham.Runtime.csproj -c Release -o artifacts/packages
+```
+
+不指定版本时，版本号取 csproj 里的 `VersionPrefix`（目前是 0.1.0）。`artifacts/` 已经在 `.gitignore` 里，不会被提交。
+
+CI 写在 [.github/workflows/ci.yml](../.github/workflows/ci.yml) 里，在 Windows 上运行：
+
+- 推送到 main 或提交 PR 时，依次还原、构建（警告当作错误）、运行 `dotnet test`、打包，并把包上传为构建产物。这时的版本号带预发布后缀，例如 `0.1.0-ci.12`，不发布到 nuget.org。
+- 推送 `v` 开头的标签时，用标签里的版本号打包，例如标签 `v0.2.0` 打出 `0.2.0`，然后由 `publish` 任务推送到 nuget.org。nuget.org 上已经存在的版本号不能再用，所以每次发布都要换一个新标签。
+- CI 没有做 NativeAOT 检查，改动公开类型、泛型用法或生成器输出时仍然按上一节在本机检查。
+
+发布用的是 nuget.org 的 Trusted Publishing：GitHub Actions 在运行时签发一个 OIDC 令牌（一种证明“这次运行来自哪个仓库的哪个工作流”的短期凭据），`NuGet/login` 用它向 nuget.org 换一个一小时内有效的 API key。因此仓库里不保存长期 API key。需要做的设置：
+
+1. 在 nuget.org 的账号菜单里打开 Trusted Publishing，新建一条策略：Repository Owner 填 `CairnPack`，Repository 填 `HaythamRuntime`，Workflow File 填 `ci.yml`，Environment 填 `nuget`；Package Owner 选拥有 `Haytham.Runtime` 包的账号或组织。
+2. 在 GitHub 仓库的 Settings → Secrets and variables → Actions 里添加 secret `NUGET_USER`，值是 nuget.org 的用户名（个人资料里显示的名字，不是邮箱）。
+3. 在 GitHub 仓库的 Settings → Environments 里新建环境 `nuget`。可以在这里设置审批人，这样推送标签后要有人批准才会发布。
+
+如果不用 Trusted Publishing，也可以在 nuget.org 创建一个只有 Push 权限、包名限定为 `Haytham.Runtime` 的 API key，存成 secret，再把工作流里的 `NuGet/login` 一步去掉、`--api-key` 改成这个 secret。这种 key 最长一年有效，到期要手动更换。
+
 ## 下一步工作边界
 
 下面三段是 2026-10-31 定下的实施顺序，到 2026-11-03 已经按这个顺序全部做完，保留在这里作为记录。目前还没做的是补齐验证场景、日志接入和生成器的构建期检查；Haytham.Runtime.Native 项目已暂缓。

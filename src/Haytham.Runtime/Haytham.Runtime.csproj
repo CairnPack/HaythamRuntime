@@ -7,9 +7,67 @@
         <IsAotCompatible>true</IsAotCompatible>
     </PropertyGroup>
 
+    <PropertyGroup>
+        <!-- NuGet 包信息。正式发布时 CI 用标签里的版本号覆盖 VersionPrefix，见 docs/development.md 的“打包与发布”。 -->
+        <PackageId>Haytham.Runtime</PackageId>
+        <VersionPrefix>0.1.0</VersionPrefix>
+        <Authors>CairnPack</Authors>
+        <Copyright>Copyright (c) 2026 CairnPack</Copyright>
+        <Description>Embeddable runtime for Haytham modules: module lifecycle, events, managed tasks and resource cleanup. Includes the source generator that builds module manifests at compile time.</Description>
+        <PackageTags>haytham;runtime;modules;source-generator;nativeaot</PackageTags>
+        <PackageLicenseExpression>MIT</PackageLicenseExpression>
+        <PackageProjectUrl>https://github.com/CairnPack/HaythamRuntime</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/CairnPack/HaythamRuntime.git</RepositoryUrl>
+        <RepositoryType>git</RepositoryType>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+        <!-- 没写 XML 文档注释的公开成员先不报 CS1591，等公开 API 稳定后再补。 -->
+        <NoWarn>$(NoWarn);CS1591</NoWarn>
+        <IncludeSymbols>true</IncludeSymbols>
+        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+        <!-- 在 GitHub Actions 里构建时把源码路径换成仓库内的相对路径，符号包里的 Source Link 才能对上 GitHub 上的文件。 -->
+        <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+    </PropertyGroup>
+
     <ItemGroup>
         <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.14" />
         <PackageReference Include="System.Threading.RateLimiting" Version="10.0.14" />
     </ItemGroup>
+
+    <ItemGroup>
+        <!-- 只为保证打包前先构建生成器；Runtime 自己不运行生成器，也不引用它的程序集。 -->
+        <ProjectReference
+            Include="..\Haytham.Runtime.Generators\Haytham.Runtime.Generators.csproj"
+            ReferenceOutputAssembly="false"
+            PrivateAssets="all" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Include="..\..\README.md" Pack="true" PackagePath="\" Visible="false" />
+        <!-- NuGet 只自动导入和包同名的 props，所以在包里改名为 Haytham.Runtime.props。 -->
+        <None
+            Include="..\Haytham.Runtime.Generators\build\Haytham.Runtime.Generators.props"
+            Pack="true"
+            PackagePath="build\Haytham.Runtime.props"
+            Visible="false" />
+    </ItemGroup>
+
+    <PropertyGroup>
+        <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);PackGenerator</TargetsForTfmSpecificContentInPackage>
+    </PropertyGroup>
+
+    <!-- 把生成器程序集和它的中文资源程序集放进包的 analyzers 目录，引用这个包的项目会自动运行生成器。 -->
+    <Target Name="PackGenerator">
+        <MSBuild Projects="..\Haytham.Runtime.Generators\Haytham.Runtime.Generators.csproj" Targets="GetTargetPath" RemoveProperties="TargetFramework">
+            <Output TaskParameter="TargetOutputs" ItemName="_HaythamGeneratorAssembly" />
+        </MSBuild>
+        <MSBuild Projects="..\Haytham.Runtime.Generators\Haytham.Runtime.Generators.csproj" Targets="SatelliteDllsProjectOutputGroup" RemoveProperties="TargetFramework">
+            <Output TaskParameter="TargetOutputs" ItemName="_HaythamGeneratorSatellite" />
+        </MSBuild>
+        <ItemGroup>
+            <TfmSpecificPackageFile Include="@(_HaythamGeneratorAssembly)" PackagePath="analyzers\dotnet\cs" />
+            <TfmSpecificPackageFile Include="@(_HaythamGeneratorSatellite)" PackagePath="analyzers\dotnet\cs\%(_HaythamGeneratorSatellite.Culture)" />
+        </ItemGroup>
+    </Target>
 
 </Project>
