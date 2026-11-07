@@ -100,19 +100,30 @@ README.md
 dotnet pack src/Haytham.Runtime/Haytham.Runtime.csproj -c Release -o artifacts/packages
 ```
 
-不指定版本时，版本号取 csproj 里的 `VersionPrefix`（目前是 0.1.0）。`artifacts/` 已经在 `.gitignore` 里，不会被提交。
+版本号取 csproj 里的 `VersionPrefix`（目前是 0.1.0）。`artifacts/` 已经在 `.gitignore` 里，不会被提交。
 
-CI 写在 [.github/workflows/ci.yml](../.github/workflows/ci.yml) 里，在 Windows 上运行：
+CI 写在 [.github/workflows/ci.yml](../.github/workflows/ci.yml) 里，在 Windows 上运行。日常开发在 main 上进行，要发布时从 main 向 `publish` 分支提 PR，合并后自动发布：
 
-- 推送到 main 或提交 PR 时，依次还原、构建（警告当作错误）、运行 `dotnet test`、打包，并把包上传为构建产物。这时的版本号带预发布后缀，例如 `0.1.0-ci.12`，不发布到 nuget.org。
-- 推送 `v` 开头的标签时，用标签里的版本号打包，例如标签 `v0.2.0` 打出 `0.2.0`，然后由 `publish` 任务推送到 nuget.org。nuget.org 上已经存在的版本号不能再用，所以每次发布都要换一个新标签。
-- CI 没有做 NativeAOT 检查，改动公开类型、泛型用法或生成器输出时仍然按上一节在本机检查。
+| 触发方式 | CI 做什么 | 版本号 | 是否发布 |
+|---|---|---|---|
+| 推送到 main，或向 main 提 PR | 还原、构建（警告当作错误）、运行 `dotnet test`、打包并上传为构建产物 | 带预发布后缀，例如 `0.1.1-ci.12` | 不发布 |
+| 向 publish 提 PR | 同上，另外先检查 `VersionPrefix` 在 nuget.org 上还没有用过 | 带预发布后缀 | 不发布 |
+| PR 合并进 publish | 同上，并检查版本号 | `VersionPrefix`，例如 `0.1.1` | 由 `publish` 任务推送到 nuget.org |
+
+发布一个新版本的步骤：
+
+1. 在 main 上把 [Haytham.Runtime.csproj](../src/Haytham.Runtime/Haytham.Runtime.csproj) 里的 `VersionPrefix` 改成新版本号并提交。nuget.org 上已经存在的版本号不能再用，0.1.0 已经发布过。
+2. 从 main 向 publish 提 PR。如果忘了改版本号，这个 PR 的 CI 会在版本号检查一步失败，并提示要改哪里。
+3. CI 通过后合并 PR，CI 会构建、测试并发布到 nuget.org。推送那一步不加 `--skip-duplicate`，所以版本号重复时这一步会报错，而不会看起来成功却没有发布。
+
+CI 没有做 NativeAOT 检查，改动公开类型、泛型用法或生成器输出时仍然按上一节在本机检查。
 
 发布用的是 nuget.org 的 Trusted Publishing：GitHub Actions 在运行时签发一个 OIDC 令牌（一种证明“这次运行来自哪个仓库的哪个工作流”的短期凭据），`NuGet/login` 用它向 nuget.org 换一个一小时内有效的 API key。因此仓库里不保存长期 API key。需要做的设置：
 
 1. 在 nuget.org 的账号菜单里打开 Trusted Publishing，新建一条策略：Repository Owner 填 `CairnPack`，Repository 填 `HaythamRuntime`，Workflow File 填 `ci.yml`，Environment 填 `nuget`；Package Owner 选拥有 `Haytham.Runtime` 包的账号或组织。
-2. 在 GitHub 仓库的 Settings → Secrets and variables → Actions 里添加 secret `NUGET_USER`，值是 nuget.org 的用户名（个人资料里显示的名字，不是邮箱）。
-3. 在 GitHub 仓库的 Settings → Environments 里新建环境 `nuget`。可以在这里设置审批人，这样推送标签后要有人批准才会发布。
+2. 在 GitHub 仓库的 Settings → Environments 里新建环境 `nuget`，把 Deployment branches and tags 设为只允许 `publish` 分支，这样其他分支上的工作流拿不到发布权限。也可以在这里设置审批人，合并后要有人批准才会发布。
+3. 在 `nuget` 环境的设置页里添加 Environment secret `NUGET_USER`，值是 nuget.org 的用户名（个人资料里显示的名字，不是邮箱）。不要建成 Variable，因为工作流读取的是 `secrets.NUGET_USER`。
+4. 在 GitHub 仓库的 Settings → Branches（或 Rules → Rulesets）里给 `publish` 分支加保护规则：要求通过 PR 合并，并要求 `build` 检查通过后才能合并。这样就不能绕过 CI 直接推送到 publish。
 
 如果不用 Trusted Publishing，也可以在 nuget.org 创建一个只有 Push 权限、包名限定为 `Haytham.Runtime` 的 API key，存成 secret，再把工作流里的 `NuGet/login` 一步去掉、`--api-key` 改成这个 secret。这种 key 最长一年有效，到期要手动更换。
 

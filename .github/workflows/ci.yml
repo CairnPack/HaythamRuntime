@@ -1,12 +1,13 @@
 # 构建、测试并打包 Haytham.Runtime。
-# 推送到 main 或提交 PR 时只打包、上传为构建产物；推送 v 开头的标签（例如 v0.1.0）时，再用标签里的版本号发布到 nuget.org。
+# - 推送到 main 或提交 PR 时：打带 ci 后缀的预发布包，上传为构建产物，不发布。
+# - 向 publish 分支提交 PR 时：另外检查 csproj 里的版本号在 nuget.org 上还没有用过。
+# - PR 合并进 publish 分支（也就是推送到 publish）时：按 csproj 里的版本号打包，并发布到 nuget.org。
 # 发布用 nuget.org 的 Trusted Publishing，不保存长期 API key，设置步骤见 docs/development.md 的“打包与发布”。
 name: CI
 
 on:
   push:
-    branches: [main]
-    tags: ['v*']
+    branches: [main, publish]
   pull_request:
   workflow_dispatch:
 
@@ -21,12 +22,33 @@ jobs:
   build:
     # 验证场景和 NativeAOT 检查目前只在 Windows 上验证过，所以 CI 也用 Windows。
     runs-on: windows-latest
+    env:
+      IS_RELEASE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/publish' }}
+      TARGETS_PUBLISH: ${{ github.base_ref == 'publish' || github.ref == 'refs/heads/publish' }}
     steps:
       - uses: actions/checkout@v5
 
       - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 10.0.403
+
+      - name: Check version is unused on nuget.org
+        if: env.TARGETS_PUBLISH == 'true'
+        shell: pwsh
+        run: |
+          $version = dotnet msbuild src/Haytham.Runtime/Haytham.Runtime.csproj -getProperty:Version
+          $response = Invoke-WebRequest 'https://api.nuget.org/v3-flatcontainer/haytham.runtime/index.json' -SkipHttpErrorCheck
+          if ($response.StatusCode -eq 404) {
+            Write-Host "nuget.org 上还没有 Haytham.Runtime，$version 可以发布。"
+          } elseif ($response.StatusCode -ne 200) {
+            Write-Error "查询 nuget.org 失败，状态码 $($response.StatusCode)。"
+            exit 1
+          } elseif (($response.Content | ConvertFrom-Json).versions -contains $version.ToLowerInvariant()) {
+            Write-Error "版本 $version 已经发布过，请先修改 src/Haytham.Runtime/Haytham.Runtime.csproj 里的 VersionPrefix。"
+            exit 1
+          } else {
+            Write-Host "版本 $version 还没有发布过。"
+          }
 
       - name: Restore
         run: dotnet restore HaythamRuntime.slnx
@@ -40,13 +62,11 @@ jobs:
       - name: Pack
         shell: pwsh
         run: |
-          $ref = '${{ github.ref }}'
-          if ($ref.StartsWith('refs/tags/v')) {
-            # 标签 v1.2.3 发布为 1.2.3；包版本完全由标签决定。打包时不加 --no-build，让程序集版本也按这个版本号重新编译。
-            $version = $ref.Substring('refs/tags/v'.Length)
-            dotnet pack src/Haytham.Runtime/Haytham.Runtime.csproj -c Release -o artifacts/packages -p:Version=$version
+          if ($env:IS_RELEASE -eq 'true') {
+            # 正式发布：版本号就是 csproj 里的 VersionPrefix，不加后缀。
+            dotnet pack src/Haytham.Runtime/Haytham.Runtime.csproj -c Release --no-build -o artifacts/packages
           } else {
-            # 非发布构建加上预发布后缀，避免和正式版本号重名。
+            # 其他构建加上预发布后缀，避免和正式版本号重名。加后缀会改变程序集的版本信息，所以这里不加 --no-build。
             dotnet pack src/Haytham.Runtime/Haytham.Runtime.csproj -c Release -o artifacts/packages --version-suffix "ci.${{ github.run_number }}"
           }
 
@@ -57,11 +77,15 @@ jobs:
           if-no-files-found: error
 
   publish:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' && github.ref == 'refs/heads/publish'
     needs: build
     runs-on: ubuntu-latest
-    # 和 nuget.org 上 Trusted Publishing 策略里填的 Environment 一致；也可以在仓库设置里给它加审批人。
+    # 和 nuget.org 上 Trusted Publishing 策略里填的 Environment 一致；可以在仓库设置里限定只有 publish 分支能使用它。
     environment: nuget
+    # 连续合并两个 PR 时，两次发布依次进行，不互相取消。
+    concurrency:
+      group: nuget-publish
+      cancel-in-progress: false
     permissions:
       # NuGet/login 用 GitHub 签发的 OIDC 令牌换取一小时有效的临时 API key。
       id-token: write
@@ -81,9 +105,9 @@ jobs:
         with:
           user: ${{ secrets.NUGET_USER }}
 
+      # 不加 --skip-duplicate：版本号已经存在时让这一步失败，而不是看起来成功却什么都没发布。
       - name: Push
         run: >
           dotnet nuget push "packages/*.nupkg"
           --api-key ${{ steps.login.outputs.NUGET_API_KEY }}
           --source https://api.nuget.org/v3/index.json
-          --skip-duplicate
