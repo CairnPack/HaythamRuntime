@@ -26,4 +26,10 @@
   <data name="HRT0011Message" xml:space="preserve"><value>'{0}' contains a concrete runtime task but is not declared partial</value></data>
   <data name="HRT0005Title" xml:space="preserve"><value>Module package version must be valid SemVer 2.0</value></data>
   <data name="HRT0005Message" xml:space="preserve"><value>Module package '{0}' has an invalid SemVer 2.0 value '{1}' for the MSBuild property 'Version'. Use MAJOR.MINOR.PATCH, optionally followed by -prerelease and +build metadata.</value></data>
+  <data name="HRT0012Title" xml:space="preserve"><value>Input catalog must be a top-level static partial class</value></data>
+  <data name="HRT0012Message" xml:space="preserve"><value>'{0}' must be a top-level static partial class</value></data>
+  <data name="HRT0013Title" xml:space="preserve"><value>Input name must be constant</value></data>
+  <data name="HRT0013Message" xml:space="preserve"><value>Input field '{0}' must use a compile-time constant string for name</value></data>
+  <data name="HRT0014Title" xml:space="preserve"><value>Duplicate input name</value></data>
+  <data name="HRT0014Message" xml:space="preserve"><value>Input name '{0}' is duplicated in this catalog</value></data>
 </root>

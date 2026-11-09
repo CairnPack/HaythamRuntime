@@ -11,7 +11,9 @@ namespace Test;
 internal static partial class ScenarioRunner {
     internal static readonly string[] Names = ["default", "parallel-fail-fast", "queue", "cancel-and-fail", "output-failure", "pre-stop",
         "stop-decision", "start-rollback", "continuous-retry", "merge-errors", "repeat-calls", "kill", "kill-strategy",
-        "cleanup-failure", "task-report-boundary", "exit-policy-snapshot", "continuous-stop-signals"];
+        "cleanup-failure", "task-report-boundary", "exit-policy-snapshot", "continuous-stop-signals",
+        "input-dispatch", "input-call-stop", "input-cleanup", "input-merge-errors", "input-output-failure",
+        "input-missing-input-metadata", "input-missing-reply-metadata"];
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
 
     internal static async Task<int> RunAsync(string[] args) {
@@ -90,6 +92,12 @@ internal static partial class ScenarioRunner {
     }
 
     private static async Task RunScenarioAsync(string name) {
+        if (name is "input-dispatch" or "input-call-stop" or "input-cleanup" or "input-merge-errors" or "input-output-failure"
+            or "input-missing-input-metadata" or "input-missing-reply-metadata") {
+            await RunInputScenarioAsync(name);
+            return;
+        }
+
         if (name == "default") {
             Console.WriteLine("检查规格：第 6 节 StartAsync、PreStopAsync、CancelPreStop 和 StopAsync；现有演示最终停止结果为 Stopped。");
             var result = await Demo.RunAsync();

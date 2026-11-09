@@ -16,3 +16,6 @@ HRT0008 | Haytham.Runtime.Tasks | Error | RuntimeTaskGenerator: concrete task cl
 HRT0009 | Haytham.Runtime.Tasks | Error | RuntimeTaskGenerator: concrete task class is not sealed
 HRT0010 | Haytham.Runtime.Tasks | Error | RuntimeTaskGenerator: concrete task class declares type parameters
 HRT0011 | Haytham.Runtime.Tasks | Error | RuntimeTaskGenerator: containing type of a concrete task is not partial
+HRT0012 | Haytham.Runtime.Inputs | Error | RuntimeInputGenerator: catalog must be a top-level static partial class
+HRT0013 | Haytham.Runtime.Inputs | Error | RuntimeInputGenerator: input name must be a constant string
+HRT0014 | Haytham.Runtime.Inputs | Error | RuntimeInputGenerator: duplicate name in catalog

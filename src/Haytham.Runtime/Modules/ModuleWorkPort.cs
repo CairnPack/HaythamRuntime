@@ -12,6 +12,8 @@ public sealed class ModuleWorkPort {
         this.module = module;
     }
 
+    public void RegisterCleanup(Func<ValueTask<CleanupResult>> cleanup) => host.RegisterCleanup(module, cleanup);
+
     public ValueTask PublishAsync<TEvent>(TEvent e, CancellationToken cancellation = default)
         where TEvent : RuntimeEvent => host.PublishRootAsync(module, e, cancellation);
 

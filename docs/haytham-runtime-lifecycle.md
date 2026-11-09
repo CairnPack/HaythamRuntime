@@ -63,12 +63,35 @@ Gebinde CLI 和第三方消费者可以没有图形前端，但仍使用同样�
 | Task／Event 注册 | 执行 OnRegistering，等待订阅者提交 Registry，校验合并两类定义与绑定，拒绝冲突及覆盖内置事件，然后锁定注册结果。 |
 | 加载 | 注册结果锁定后按依赖推进；业务初始化仅在实际注册的对应事件执行时发生，完成该事件要求等待的工作。 |
 | 启动 | 让已加载模块进入可执行状态，启动所需的持续工作；启动完成不要求持续工作已经结束。 |
-| 运行 | 外部输入匹配 Task，由任务池管理本次执行，通过独立 TaskEvent 信道组织内部短程工作并返回结果；模块 Event 使用相同执行机制。 |
-| 请求 Stop | 先关闭新外部输入准入，再执行 OnStopRequested；否决则返回被否决并恢复准入。 |
-| 停止执行 | 未否决则等已接纳短程 Task 及必要内部工作自然完成，再进入不可逆 OnStopping，结束持续工作并等待真实结束。 |
+| 运行 | 外部名字通过输入目录匹配 Task 或同步调用。Task 经独立 TaskEvent 信道组织工作，完成输出后结束；同步调用在调用线程内完成。模块 Event 使用相同的受托管执行机制。 |
+| 请求 Stop | 原子关闭 Task 和同步调用准入，等已进入的同步调用返回，再派发 OnStopRequested；否决或判定失败恢复之前的状态及其准入。 |
+| 停止执行 | 未否决则进入 Draining，循环等根工作排空，再进入不可逆 OnStopping，结束持续工作并等待真实结束。全部 OnStopping 派发完后再次循环排空根工作，然后原子关闭清理登记并进入卸载。 |
 | Unload | 按实际成功加载顺序反序卸载，只释放自有资源；全部完成则 Stopped，清理失败保留错误并继续仍安全的清理，最终 Hanging 并返回失败。 |
 
-上述注册、运行与正常停止顺序已获用户确认。外部准入关闭不阻断已接纳 Task 的必要内部工作；Task 失败回传原调用方并解除登记，不阻断 Stop。持续工作分开追踪，不能在发送停止信号前等待无限循环。OnStopRequested 处理器自身抛异常的策略及多个处理器的具体判定调度仍待定，不将业务 Task 失败策略直接套用到停止判定。
+外部准入关闭不阻断已接纳 Task 的必要内部工作；Task 失败回传原调用方并解除登记，不阻断 Stop。持续工作分开追踪，不能在发送停止信号前等待无限循环。OnStopRequested 的处理器逐个执行并收集失败；有失败返回 DecisionFailed，否则有否决返回 Vetoed，两者都恢复此前状态。
+
+### 外部输入与同步调用的准入
+
+输入目录由 `[InputCatalog(typeof(JsonContext))]` 标记的 `static partial class` 声明，生成器为 `static readonly TaskInput<...>` 和 `CallInput<...>` 字段生成 `Register(Registry)` 与静态 `Manifest`。名字为编译期常量且在目录内唯一，模块在 `OnRegistering` 登记，Runtime 在 Registry 合并时检查跨模块重名并锁定输入表。JSON 使用源生成的 `JsonTypeInfo<T>` 解析和序列化。
+
+`StartInput` 和 `CallInput` 对未知名字、种类不符、非法或 null JSON、当前不接收返回通用拒绝及说明。业务失败由 `mapResult` 返回 `InputFailure`，Runtime 不解释其内容。Task 的映射与序列化放在输出收尾里，输出的 `CompleteAsync` 完成后才交出同键执行权。`StartInput` 返回运行句柄前根 Task 已登记，业务不会在调用线程上执行；准入检查与登记共用 `host.Gate`，不会跨过停止边界漏登工作。直接调用公开 `Submit` 时违反准入仍抛 `RuntimeContractException`。
+
+| 状态 | Task 输入 | 同步调用 |
+|---|---|---|
+| Running | 接收 | 接收 |
+| PreStopping | NotAccepting | 接收 |
+| StopRequested、Draining、Stopping、Unloading | NotAccepting | NotAccepting |
+| 其他状态 | 不接收 | NotAccepting |
+
+模块以 `RegisterCall` 登记纯内存、毫秒级的 `RuntimeCall<TInput, TResult>`。宿主既可以经 JSON 名字调用，也可以用 `Call<TCall, TInput, TResult>` 直接传对象；直接调用返回 `Completed(result)` 或 `NotAccepting`。两条路径共用准入和进入计数：在锁内检查并计数，锁外执行处理器，最后退出计数。计数归零通过 `TaskCompletionSource` 通知停止流程，不轮询。同步输入的映射、序列化也属于这段在途调用；内部异常直接传给调用方，计数仍正确退出。
+
+### 模块清理与停止等待
+
+`ModuleWorkPort.RegisterCleanup(Func<ValueTask<CleanupResult>>)` 把后台清理登记为属于该模块的根工作。`Running`、`PreStopping`、`StopRequested`、`Draining`、`Stopping` 都允许登记，其他状态是调用约定错误，抛 `RuntimeContractException`。清理用 `Task.Run` 执行并抑制 `ExecutionContext` 流动，不在登记线程执行，也不因预退出的取消请求而取消。
+
+`Draining` 和全部 `OnStopping` 派发后的排空都循环到没有根工作，所以清理可以在已有工作结束时继续登记，也可以由 `OnStopping` 登记。最后一次确认没有根工作与进入 `Unloading` 在同一次持锁中完成，此后禁止新清理，保证依赖资源不会提前卸载。
+
+清理返回 `CleanupResult.Done` 表示完成，返回 `Failed(message)` 或抛异常都记为 `RuntimeFailureKind.Cleanup`，保留在宿主直到实际停止收尾，再放进 `StopOutcome.Failures`。抛出的异常另外经 `ObserveFailure` 记录日志。清理失败不阻塞模块卸载，`StopOutcome.Kind` 仍按卸载结果判断：卸载完成为 `Stopped`，卸载受阻为 `CleanupFailed`。调用方需要同时检查 `Failures`。模块需要通知用户时在清理委托内部完成通知，Runtime 不认识产品协议。
 
 主阶段推进必须等待该阶段必需的工作。启动中途失败不能自动进入运行；清理出错也不能报告成功卸载。失败时的可用范围、结果结构与回收路径需要明确设计，不在成功主线图中伪装成普通下一阶段。
 

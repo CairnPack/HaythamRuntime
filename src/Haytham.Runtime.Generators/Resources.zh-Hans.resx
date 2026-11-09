@@ -26,4 +26,10 @@
   <data name="HRT0011Message" xml:space="preserve"><value>“{0}”包含具体运行时 Task，但没有声明为 partial</value></data>
   <data name="HRT0005Title" xml:space="preserve"><value>模块包版本必须是有效的 SemVer 2.0 版本号</value></data>
   <data name="HRT0005Message" xml:space="preserve"><value>模块包“{0}”的 MSBuild 属性 Version 值“{1}”不是有效的 SemVer 2.0 版本号。请使用 MAJOR.MINOR.PATCH，可附加 -预发布标识和 +构建元数据。</value></data>
+  <data name="HRT0012Title" xml:space="preserve"><value>输入目录必须是顶层 static partial 类</value></data>
+  <data name="HRT0012Message" xml:space="preserve"><value>“{0}”必须声明为顶层 static partial class</value></data>
+  <data name="HRT0013Title" xml:space="preserve"><value>输入名字必须是常量</value></data>
+  <data name="HRT0013Message" xml:space="preserve"><value>输入字段“{0}”的 name 必须是编译期字符串常量</value></data>
+  <data name="HRT0014Title" xml:space="preserve"><value>输入名字重复</value></data>
+  <data name="HRT0014Message" xml:space="preserve"><value>输入目录中的名字“{0}”重复</value></data>
 </root>

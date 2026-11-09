@@ -3,6 +3,8 @@ using Haytham.Runtime.Modules;
 using Haytham.Runtime.Tasks;
 using Haytham.Runtime.Work;
 using Haytham.Runtime.Logging;
+using Haytham.Runtime.Calls;
+using Haytham.Runtime.Inputs;
 
 namespace Haytham.Runtime.Events;
 
@@ -59,7 +61,21 @@ internal sealed class EventDispatcher(RuntimeHost host, IReadOnlyList<ModuleDefi
         var problems = new List<string>();
         var mergedEvents = new Dictionary<Type, EventRegistration>(builtIns);
         var mergedTasks = new Dictionary<Type, TaskRegistration>();
+        var mergedCalls = new Dictionary<Type, CallRegistration>();
+        var mergedInputs = new Dictionary<string, InputBinding>(StringComparer.Ordinal);
         foreach (var registry in registries) {
+            foreach (var call in registry.Calls) {
+                if (!mergedCalls.TryAdd(call.Type, call)) {
+                    problems.Add($"同步调用 {call.Type.FullName} 重复登记。");
+                }
+            }
+
+            foreach (var input in registry.Inputs) {
+                if (!mergedInputs.TryAdd(input.Name, input)) {
+                    problems.Add($"输入 {input.Name} 重复登记。");
+                }
+            }
+
             foreach (var definition in registry.Events) {
                 if (typeof(LifecycleEvent).IsAssignableFrom(definition.Type) || IsTaskEvent(definition.Type)) {
                     problems.Add($"事件 {definition.Type.FullName} 不能覆盖内置事件。");
@@ -96,7 +112,23 @@ internal sealed class EventDispatcher(RuntimeHost host, IReadOnlyList<ModuleDefi
             throw new RuntimeConfigurationException("Registry 合并失败。", problems);
         }
 
-        Volatile.Write(ref plan, new DispatchPlan(mergedEvents.ToFrozenDictionary(), mergedTasks.ToFrozenDictionary(), mergedSubscriptions));
+        Volatile.Write(ref plan, new DispatchPlan(mergedEvents.ToFrozenDictionary(), mergedTasks.ToFrozenDictionary(),
+            mergedCalls.ToFrozenDictionary(), mergedInputs.ToFrozenDictionary(StringComparer.Ordinal), mergedSubscriptions));
+    }
+
+    internal InputBinding? FindInput(string name) {
+        var current = Volatile.Read(ref plan);
+        return current is not null && current.Inputs.TryGetValue(name, out var binding) ? binding : null;
+    }
+
+    internal RuntimeCall<TInput, TResult> GetCall<TCall, TInput, TResult>() where TCall : RuntimeCall<TInput, TResult> {
+        var current = Volatile.Read(ref plan);
+        if (current is null || !current.Calls.TryGetValue(typeof(TCall), out var registration)
+            || !host.IsModuleAvailable(registration.Module)) {
+            throw new RuntimeContractException($"同步调用 {typeof(TCall).Name} 未登记或所属模块不可执行。");
+        }
+
+        return (RuntimeCall<TInput, TResult>)registration.Call;
     }
 
     internal void CheckPublish(ModuleId module, RuntimeEvent e) {
@@ -247,6 +279,8 @@ internal sealed class EventDispatcher(RuntimeHost host, IReadOnlyList<ModuleDefi
     private sealed record DispatchPlan(
         FrozenDictionary<Type, EventRegistration> Events,
         FrozenDictionary<Type, TaskRegistration> Tasks,
+        FrozenDictionary<Type, CallRegistration> Calls,
+        FrozenDictionary<string, InputBinding> Inputs,
         EventSubscription[] Subscriptions);
 
     internal static async ValueTask WaitForPublishAsync(Task completion, Task<RuntimeExecutionException> firstFailure) {
