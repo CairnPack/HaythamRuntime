@@ -159,10 +159,9 @@ internal static partial class ScenarioRunner {
         Check(!first.Completion.IsCompleted && probe.Executed.SequenceEqual(new[] { 1 }),
             "失败完成事件还未入队，同键的下一项已开始执行。");
         firstOutput.Release.SetResult();
-        var completion = await (Task<TaskCompletion<NumberReply>>)first.Completion;
-        Check(completion.Business is TaskOutcome<NumberReply>.Succeeded
-            && completion.OutputFailure is { Kind: RuntimeFailureKind.Output } outputFailure
-            && ReferenceEquals(outputFailure.Exception, expected), "映射原异常没有保留为 TaskRun 的输出失败。");
+        var outputFailure = await first.Completion;
+        Check(outputFailure is { Kind: RuntimeFailureKind.Output } && ReferenceEquals(outputFailure.Exception, expected),
+            "映射原异常没有保留为输入运行句柄的输出失败。");
         await second.Completion;
         Check(secondOutput.Outcome is InputOutcome.Succeeded && probe.Executed.SequenceEqual(new[] { 1, 2 }),
             "映射失败后，同键的下一项没有正常完成。");

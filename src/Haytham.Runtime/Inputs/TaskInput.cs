@@ -26,8 +26,11 @@ public sealed class TaskInput<TTask, TInput, TResult, TReply>(string name,
                 new Output(output, mapResult, replyType), cancellation);
             return run is null
                 ? new InputStartResult.Rejected(InputRejection.NotAccepting, "当前不接收 Task 输入。")
-                : new InputStartResult.Started(new InputRun(run.Id, run.RequestCancellation, run.Completion));
+                : new InputStartResult.Started(new InputRun(run.Id, run.RequestCancellation, ReadOutputFailureAsync(run)));
         }
+
+        private static async Task<RuntimeFailure?> ReadOutputFailureAsync(TaskRun<TResult> run) =>
+            (await run.Completion).OutputFailure;
     }
 
     private sealed class Output(IInputOutput output, Func<TResult, InputResult<TReply>> mapResult,

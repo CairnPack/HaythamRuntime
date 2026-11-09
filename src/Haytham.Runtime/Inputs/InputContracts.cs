@@ -32,14 +32,15 @@ public sealed record InputManifestEntry(string Name, InputKind Kind, Type InputT
 public sealed class InputRun {
     private readonly Action requestCancellation;
 
-    internal InputRun(ExecutionId id, Action requestCancellation, Task completion) {
+    internal InputRun(ExecutionId id, Action requestCancellation, Task<RuntimeFailure?> completion) {
         Id = id;
         this.requestCancellation = requestCancellation;
         Completion = completion;
     }
 
     public ExecutionId Id { get; }
-    public Task Completion { get; }
+    /// <summary>运行结束后完成，结果是输出收尾失败；没有失败时为 null。任务本身的结果已经交给 <see cref="IInputOutput"/>。</summary>
+    public Task<RuntimeFailure?> Completion { get; }
     public void RequestCancellation() => requestCancellation();
 }
 
