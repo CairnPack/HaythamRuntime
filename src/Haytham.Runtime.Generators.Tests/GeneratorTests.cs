@@ -8,7 +8,7 @@ using Xunit;
 
 namespace Haytham.Runtime.Generators.Tests;
 
-public sealed class GeneratorTests {
+public sealed partial class GeneratorTests {
     private const string ModuleMembers = "public void Connect(Haytham.Runtime.Modules.ModuleWiring wiring) { }";
     private const string TaskMembers = """
         public override Haytham.Runtime.Tasks.TaskExitPolicy ExitPolicy => Haytham.Runtime.Tasks.TaskExitPolicy.Wait;

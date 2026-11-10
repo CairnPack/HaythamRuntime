@@ -25,6 +25,18 @@ internal static class DiagnosticDescriptors {
     private static LocalizableString Localize(string name) =>
         new LocalizableResourceString(name, Resources, typeof(DiagnosticDescriptors));
 
+    public static readonly DiagnosticDescriptor InvalidInputCatalog = new(
+        "HRT0012", Localize("HRT0012Title"), Localize("HRT0012Message"),
+        "Haytham.Runtime.Inputs", DiagnosticSeverity.Error, true);
+
+    public static readonly DiagnosticDescriptor InputNameNotConstant = new(
+        "HRT0013", Localize("HRT0013Title"), Localize("HRT0013Message"),
+        "Haytham.Runtime.Inputs", DiagnosticSeverity.Error, true);
+
+    public static readonly DiagnosticDescriptor DuplicateInputName = new(
+        "HRT0014", Localize("HRT0014Title"), Localize("HRT0014Message"),
+        "Haytham.Runtime.Inputs", DiagnosticSeverity.Error, true);
+
     // 只有特性标记，不能证明这个类真的是模块，还要实现 IRuntimeModule。
     public static readonly DiagnosticDescriptor MissingModuleInterface = new(
         id: "HRT0001",

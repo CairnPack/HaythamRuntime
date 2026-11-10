@@ -17,6 +17,12 @@ internal sealed class RuntimeTaskScheduler(RuntimeHost host) {
 
     internal TaskRun<TResult> Submit<TTask, TInput, TResult>(TInput input, string? queueKey,
         ITaskOutputSink<TResult>? output, CancellationToken cancellation) where TTask : RuntimeTask<TInput, TResult> {
+        return TrySubmit<TTask, TInput, TResult>(input, queueKey, output, cancellation)
+            ?? throw new RuntimeContractException($"Runtime 当前状态为 {host.State}，不接收新的根工作。");
+    }
+
+    internal TaskRun<TResult>? TrySubmit<TTask, TInput, TResult>(TInput input, string? queueKey,
+        ITaskOutputSink<TResult>? output, CancellationToken cancellation) where TTask : RuntimeTask<TInput, TResult> {
         WorkNode node;
         TaskRun<TResult> run;
         RuntimeFailure? outputFailure = null;
@@ -27,7 +33,9 @@ internal sealed class RuntimeTaskScheduler(RuntimeHost host) {
         var queued = false;
         RuntimeTask<TInput, TResult> task;
         lock (host.Gate) {
-            host.RequireRootAdmission();
+            if (!host.RootAdmission) {
+                return null;
+            }
             var registration = host.Events.GetTask<TTask, TInput, TResult>();
             task = (RuntimeTask<TInput, TResult>)registration.Task;
             node = new WorkNode(host, registration.Module, cancellation, reports) { TaskType = typeof(TTask).FullName };

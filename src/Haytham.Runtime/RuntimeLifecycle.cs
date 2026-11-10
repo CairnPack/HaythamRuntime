@@ -167,11 +167,15 @@ internal sealed class RuntimeLifecycle(RuntimeHost host, IReadOnlyList<ModuleDef
 
     private async Task<StopOutcome> StopCoreAsync(RuntimeState previousState) {
         try {
+            Task calls;
             lock (host.Gate) {
                 host.SetAdmission(false);
                 host.SetState(RuntimeState.StopRequested);
+                calls = host.WaitForCalls();
             }
 
+            // 已接收的同步调用可能还在修改模块状态，判定处理器必须看到这些修改完成后的状态。
+            await calls;
             var failures = new List<RuntimeFailure>();
             var vetoed = false;
             foreach (var module in modules) {
@@ -196,20 +200,20 @@ internal sealed class RuntimeLifecycle(RuntimeHost host, IReadOnlyList<ModuleDef
                 return FinishStop(StopOutcomeKind.Vetoed, []);
             }
 
-            RootExecution[] roots;
             lock (host.Gate) {
                 host.SetState(RuntimeState.Draining);
-                roots = host.SnapshotRoots();
             }
 
-            await DrainAsync(roots, failures);
+            await DrainRootsAsync(failures);
             await DisposeTaskSchedulerAsync(failures);
 
             host.SetState(RuntimeState.Stopping);
             await StopContinuousWorkAsync(failures);
             await StopModulesAsync(failures);
 
-            host.SetState(RuntimeState.Unloading);
+            // OnStopping 可以登记剩余资源的清理，卸载依赖资源前还要等这一批结束。
+            await DrainRootsAsync(failures, RuntimeState.Unloading);
+            failures.AddRange(host.TakeCleanupFailures());
             var unloaded = await UnloadModulesAsync(failures);
             host.SetState(unloaded ? RuntimeState.Stopped : RuntimeState.Hanging);
             return FinishStop(unloaded ? StopOutcomeKind.Stopped : StopOutcomeKind.CleanupFailed, failures);
@@ -281,6 +285,25 @@ internal sealed class RuntimeLifecycle(RuntimeHost host, IReadOnlyList<ModuleDef
             if (root.GetOutputFailure() is { } outputFailure) {
                 failures.Add(outputFailure);
             }
+        }
+    }
+
+    private async Task DrainRootsAsync(List<RuntimeFailure> failures, RuntimeState? nextState = null) {
+        // 等待期间，已有工作仍可能登记清理，一次快照不能代表最终排空。
+        while (true) {
+            RootExecution[] roots;
+            lock (host.Gate) {
+                roots = host.SnapshotRoots();
+                if (roots.Length == 0) {
+                    // 关闭清理登记与确认排空必须原子完成，避免卸载时才出现新清理。
+                    if (nextState is { } state) {
+                        host.SetState(state);
+                    }
+                    return;
+                }
+            }
+
+            await DrainAsync(roots, failures);
         }
     }
 

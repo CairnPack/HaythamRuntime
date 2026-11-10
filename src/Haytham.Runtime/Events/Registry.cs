@@ -1,5 +1,7 @@
 using Haytham.Runtime.Tasks;
 using Haytham.Runtime.Work;
+using Haytham.Runtime.Calls;
+using Haytham.Runtime.Inputs;
 
 namespace Haytham.Runtime.Events;
 
@@ -13,6 +15,18 @@ public sealed class Registry {
     internal List<TaskRegistration> Tasks { get; } = [];
     internal List<EventRegistration> Events { get; } = [];
     internal List<EventSubscription> Subscriptions { get; } = [];
+    internal List<CallRegistration> Calls { get; } = [];
+    internal List<InputBinding> Inputs { get; } = [];
+
+    public void RegisterCall<TInput, TResult>(RuntimeCall<TInput, TResult> call) {
+        RequireOpen();
+        Calls.Add(new CallRegistration(call.GetType(), call, Module));
+    }
+
+    internal void RegisterInput(InputBinding binding) {
+        RequireOpen();
+        Inputs.Add(binding);
+    }
 
     public void RegisterTask(RuntimeTask task) {
         ArgumentNullException.ThrowIfNull(task);
@@ -56,6 +70,7 @@ public sealed class Registry {
 }
 
 internal sealed record TaskRegistration(RuntimeTask Task, ModuleId Module, TaskExitPolicy ExitPolicy);
+internal sealed record CallRegistration(Type Type, object Call, ModuleId Module);
 internal sealed record EventRegistration(Type Type, ModuleId? Module, string Name, EventDispatchMode Mode);
 
 internal sealed record EventSubscription(Type Type, ModuleId Module, Func<RuntimeEvent, EventContext, ValueTask> Invoke) {

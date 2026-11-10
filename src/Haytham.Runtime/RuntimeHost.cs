@@ -27,6 +27,7 @@ public sealed partial class RuntimeHost {
     public event Action<ContinuousWorkFailure>? ContinuousWorkFailed;
 
     internal object Gate { get; } = new();
+    internal bool RootAdmission => rootAdmission;
     internal Guid RuntimeId { get; } = Guid.NewGuid();
     internal ILogger Logger { get; }
     internal EventDispatcher Events { get; private set; } = null!;

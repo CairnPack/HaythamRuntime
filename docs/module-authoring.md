@@ -712,6 +712,9 @@ private async ValueTask RunSyncLoopAsync(ContinuousWorkContext context) {
 | HRT0009 | Task 类没有声明为 `sealed` | 加上 `sealed` |
 | HRT0010 | Task 类带有泛型参数 | 改成具体类型；需要复用时用基类或辅助方法 |
 | HRT0011 | 包含 Task 的外层类型没有声明为 `partial` | 把外层类型也改成 `partial` |
+| HRT0012 | 输入目录不是顶层的 `static partial class` | 把目录移到顶层，并声明为 `static partial class` |
+| HRT0013 | 输入字段的 `name` 不是编译期字符串常量 | 使用字符串字面量或 `const string` 表达式 |
+| HRT0014 | 同一个输入目录里名字重复 | 为每个输入使用不同名字 |
 
 ### 运行时的常见错误
 
@@ -742,3 +745,63 @@ private async ValueTask RunSyncLoopAsync(ContinuousWorkContext context) {
 - 日志和错误消息里不要放口令、令牌或含敏感信息的完整请求。`RuntimeFailure` 是进程内的诊断对象，对外输出前要由上层转换。
 
 更多规则的来由，见 [Event 框架规格](event-framework.md) 的第 2 节（工作树）、第 3 节（派发与发布权限）、第 4 节（接线与 Registry）、第 5 节（Task）、第 6 节（生命周期）和第 7 节（持续工作）。
+
+## 10. 外部输入和同步调用
+
+模块可以用 `Haytham.Runtime.Inputs` 里的声明把外部名字绑定到 Task 或同步处理器。Runtime 负责查名字、检查种类、解析 JSON 和提交工作，协议错误码、通知方式由宿主决定。
+
+```csharp
+[InputCatalog(typeof(AppJson))]
+internal static partial class AppInputs {
+    public static readonly TaskInput<OpenTask, OpenInput, OpenResult, OpenReply> Open =
+        new(name: "store.open", queueKey: static _ => "store.open", mapResult: Results.Open);
+
+    public static readonly CallInput<ReadStatusCall, EmptyInput, StoreSnapshot, StoreReply> Status =
+        new(name: "store.status", mapResult: Results.Status);
+}
+```
+
+四个泛型参数依次是目标类型、输入类型、目标返回类型、对外成功结果类型。目录只支持顶层的 `static partial class`，声明使用 `static readonly` 字段。`name` 必须是编译期字符串常量；同一目录重复在编译时报错，不同模块登记同名输入在 Registry 合并时报错。
+
+`AppJson` 是 `System.Text.Json` 源生成的 `JsonSerializerContext`，用 `[JsonSerializable]` 列出输入类型和对外成功结果类型。生成的 `AppInputs.Register(registry)` 从 `AppJson.Default.GetTypeInfo(typeof(T))` 取得 `JsonTypeInfo<T>`，不扫描或反射调用。缺少元数据时直接抛 `RuntimeContractException`，消息指出缺少的类型和上下文，启动在登记阶段失败。模块在 `OnRegistering` 里调用它，并另外用 `RegisterTask`、`RegisterCall` 登记目标实例。只读取 `AppInputs.Manifest` 不需要创建宿主或执行登记；每项包含名字、Task／Call 种类、输入类型、回复类型和字段名，工具可以用字段名查 XML 文档。
+
+`mapResult` 返回 `new InputResult<TReply>.Success(reply)`，或者 `new InputResult<TReply>.Failure(new InputFailure(code, error, args))`。两者都是 `InputResult<TReply>` 的 record 分支，调用方用模式匹配读取 `Reply` 或 `Error`。后者表示业务正常执行但结果不成功；Runtime 原样转交，不解释 `Code`、`Error`、`Args`。
+
+宿主用 `StartInput(name, inputJson, output, cancellation)` 提交 Task。返回 `InputStartResult.Started` 时，根 Task 已完成登记，`Run` 提供 `Id`、`RequestCancellation()` 和 `Completion`。业务在线程池执行。宿主实现非泛型 `IInputOutput` 接收状态、进度、日志和最终 `InputOutcome`：成功 JSON、业务失败、Runtime 故障或取消。结果映射或 JSON 序列化失败时，Runtime 仍用 `InputOutcome.Failed` 通知宿主，同时保留 Task 的输出失败。Task 的结果映射、JSON 序列化及 `CompleteAsync` 全部完成后，才释放同键执行权；`Completion` 表示这次运行及输出收尾已经结束。
+
+宿主用 `CallInput(name, inputJson)` 调用同步输入，得到 `InputCallResult.Completed` 的 JSON、`BusinessFailed` 或 `Rejected`。两种入口对未知名字、种类不符、非法或 null JSON、生命周期不接收分别返回 `UnknownName`、`WrongKind`、`InvalidInput`、`NotAccepting`，并附说明。内部处理器、映射或序列化缺陷不转成这些拒绝。
+
+同步处理器放在 `Haytham.Runtime.Calls`：
+
+```csharp
+internal sealed class ReadStatusCall(StatusStore store) : RuntimeCall<EmptyInput, StoreSnapshot> {
+    protected override StoreSnapshot Invoke(EmptyInput input) => store.Snapshot;
+}
+
+// 在 OnRegistering 里登记实例。
+registry.RegisterCall(new ReadStatusCall(store));
+
+// 宿主的固定同步入口可以直接传对象，不经过 JSON。
+var result = host.Call<ReadStatusCall, EmptyInput, StoreSnapshot>(new EmptyInput());
+```
+
+同步处理器只做纯内存、毫秒级操作。`CallOutcome<TResult>.Completed` 带返回值，`NotAccepting` 表示现在不能调用。处理器在调用线程执行，但不持有宿主锁；异常直接传给调用方。`Running` 和 `PreStopping` 接收同步调用；进入 `StopRequested` 时原子关闭准入，等待已进入的调用连同同步输入的映射、序列化结束，再派发停止判定。否决或判定失败恢复原状态，也恢复该状态允许的同步调用。其他状态都不接收。不要在同步处理器里阻塞等待 `StopAsync`，停止本身也在等待该处理器返回。
+
+## 11. 登记模块清理
+
+模块保存 `wiring.RootWork`，需要异步清理时调用 `ModuleWorkPort.RegisterCleanup`。例如同步释放入口先移除 handle、登记清理，再同步返回；这个返回只表示清理已登记，实际完成由 Runtime 跟踪。
+
+```csharp
+rootWork.RegisterCleanup(async () => {
+    await resource.DisposeAsync();
+    return CleanupResult.Done;
+});
+```
+
+`CleanupResult` 在 `Haytham.Runtime.Modules` 中。预期失败返回 `CleanupResult.Failed(message)`；如果要通知用户，模块在委托内部发送通知再返回失败。Runtime 不替模块发送产品通知。
+
+`Running`、`PreStopping`、`StopRequested`、`Draining`、`Stopping` 都允许登记；其他状态抛 `RuntimeContractException`。清理立即登记为属于该模块的根工作，委托在线程池执行，不继承调用者的 `ExecutionContext`，预退出不会取消它。不要把清理直接丢给未登记的线程池，否则停止无法等待它。
+
+正式停止在 `Draining` 中循环等待根工作，直到没有根工作；派发完所有 `OnStopping` 后再循环等待一次。模块可以在 `OnStopping` 释放剩余资源并登记清理，全部结束后才开始卸载。确认最终排空与关闭清理登记在同一把锁下完成。
+
+返回 `Failed` 或抛异常都会保存为 `RuntimeFailureKind.Cleanup`，由完成停止的 `StopOutcome.Failures` 返回；异常还会写入故障日志。即使清理在调用 `StopAsync` 之前已失败，错误也会保留。停止被否决或判定失败时，错误保留到之后实际收尾。清理失败本身不阻塞模块卸载；成功卸载仍返回 `Stopped`，所以宿主必须同时检查 `Kind` 和 `Failures`。
