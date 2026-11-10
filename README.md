@@ -40,7 +40,7 @@ dotnet add package Haytham.Runtime
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="Haytham.Runtime" Version="0.1.0" />
+        <PackageReference Include="Haytham.Runtime" Version="0.2.0" />
     </ItemGroup>
 
 </Project>
@@ -86,7 +86,7 @@ public sealed partial class GreetTask : RuntimeTask<string, string> {
 </PropertyGroup>
 
 <ItemGroup>
-    <PackageReference Include="Haytham.Runtime" Version="0.1.0" />
+    <PackageReference Include="Haytham.Runtime" Version="0.2.0" />
     <PackageReference Include="Acme.Greeting" Version="1.0.0" />
 </ItemGroup>
 ```

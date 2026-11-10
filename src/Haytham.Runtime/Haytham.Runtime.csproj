@@ -10,7 +10,7 @@
     <PropertyGroup>
         <!-- NuGet 包信息。VersionPrefix 就是正式发布的版本号，每次向 publish 分支提 PR 前先改大它，见 docs/development.md 的“打包与发布”。 -->
         <PackageId>Haytham.Runtime</PackageId>
-        <VersionPrefix>0.1.0</VersionPrefix>
+        <VersionPrefix>0.2.0</VersionPrefix>
         <Authors>CairnPack</Authors>
         <Copyright>Copyright (c) 2026 CairnPack</Copyright>
         <Description>Embeddable runtime for Haytham modules: module lifecycle, events, managed tasks and resource cleanup. Includes the source generator that builds module manifests at compile time.</Description>
